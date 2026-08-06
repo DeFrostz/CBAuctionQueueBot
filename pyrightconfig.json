@@ -1,0 +1,13 @@
+{
+  "include": [
+    "main.py",
+    "config.py",
+    "database.py",
+    "generator.py",
+    "cogs"
+  ],
+  "extraPaths": [
+    ".pythonlibs/lib/python3.11/site-packages"
+  ],
+  "typeCheckingMode": "basic"
+}
