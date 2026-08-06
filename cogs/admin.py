@@ -28,6 +28,100 @@ class Admin(commands.Cog):
         }.get(reward, reward)
 
 
+    @discord.app_commands.command(
+        name="setallstock",
+        description="Set stock for all three rewards at once"
+    )
+    @discord.app_commands.describe(
+        card="Total Card stock",
+        light_dark="Total Light-Dark stock",
+        time_space="Total Time-Space stock"
+    )
+    async def setallstock(
+        self,
+        interaction: discord.Interaction,
+        card: int,
+        light_dark: int,
+        time_space: int
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "❌ This command can only be used in a server"
+            )
+            return
+
+        stock_values = {
+            "CARD": card,
+            "FEATHER_S": light_dark,
+            "FEATHER_A": time_space
+        }
+
+        if any(stock < 0 for stock in stock_values.values()):
+            await interaction.response.send_message(
+                "❌ Stock must be 0 or greater for all rewards"
+            )
+            return
+
+        guild_id = str(interaction.guild.id)
+        for reward, stock in stock_values.items():
+            set_reward_stock(guild_id, reward, stock)
+
+        await interaction.response.send_message(
+            "✅ All reward stock updated\n"
+            f"🃏 Card: {card}\n"
+            f"🌗 Light-Dark: {light_dark}\n"
+            f"⏳ Time-Space: {time_space}\n"
+            "Queue limits were not changed."
+        )
+
+
+    @discord.app_commands.command(
+        name="setalllimit",
+        description="Set limits for all three rewards at once"
+    )
+    @discord.app_commands.describe(
+        card="Card amount per queue",
+        light_dark="Light-Dark amount per queue",
+        time_space="Time-Space amount per queue"
+    )
+    async def setalllimit(
+        self,
+        interaction: discord.Interaction,
+        card: int,
+        light_dark: int,
+        time_space: int
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "❌ This command can only be used in a server"
+            )
+            return
+
+        limit_values = {
+            "CARD": card,
+            "FEATHER_S": light_dark,
+            "FEATHER_A": time_space
+        }
+
+        if any(limit < 1 for limit in limit_values.values()):
+            await interaction.response.send_message(
+                "❌ Every limit must be 1 or greater"
+            )
+            return
+
+        guild_id = str(interaction.guild.id)
+        for reward, limit in limit_values.items():
+            set_reward_limit(guild_id, reward, limit)
+
+        await interaction.response.send_message(
+            "✅ All queue limits updated\n"
+            f"🃏 Card: {card}\n"
+            f"🌗 Light-Dark: {light_dark}\n"
+            f"⏳ Time-Space: {time_space}\n"
+            "Stock amounts were not changed."
+        )
+
+
 
     @discord.app_commands.command(
         name="setstock",
