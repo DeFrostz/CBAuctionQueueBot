@@ -271,6 +271,23 @@ def get_queue(
     return result
 
 
+def get_all_queue(guild_id):
+    conn = get_connection()
+
+    result = conn.execute("""
+    SELECT *
+    FROM queue_plan
+    WHERE guild_id=?
+    ORDER BY queue_no, reward_type, page, slot
+    """, (
+        guild_id,
+    )).fetchall()
+
+    conn.close()
+
+    return result
+
+
 def get_queue_count(guild_id):
     conn = get_connection()
 

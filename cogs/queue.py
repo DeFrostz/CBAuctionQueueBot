@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 
 from database import (
+    get_all_queue,
     get_queue,
     get_queue_count,
     get_rewards
@@ -166,125 +167,80 @@ class Queue(commands.Cog):
 
 
     @discord.app_commands.command(
-
         name="queue",
-
-        description="View your auction queue"
-
+        description="View all queues or one specific queue"
     )
     @discord.app_commands.describe(
-
-        number="Queue number"
-
+        number="Optional queue number to view only that queue"
     )
     async def queue(
-
         self,
-
         interaction: discord.Interaction,
-
-        number: int
-
+        number: int | None = None
     ):
-
-
-        guild_id = str(
-            interaction.guild.id
-        )
-
-
-        data = get_queue(
-            guild_id,
-            number
-        )
-
-
-        if not data:
-
-
+        if interaction.guild is None:
             await interaction.response.send_message(
-
-                "❌ Queue not found"
-
+                "❌ This command can only be used in a server"
             )
-
             return
 
-
-
-        reward_group = {}
-
-
-        for row in data:
-
-
-            reward = row["reward_type"]
-
-
-            if reward not in reward_group:
-
-                reward_group[reward] = []
-
-
-
-            reward_group[reward].append(
-                row
-            )
-
-
-
-        embed = discord.Embed(
-
-            title=f"📋 Queue #{number}",
-
-            description="Auction Position"
-
+        guild_id = str(interaction.guild.id)
+        data = (
+            get_queue(guild_id, number)
+            if number is not None
+            else get_all_queue(guild_id)
         )
 
+        if not data:
+            await interaction.response.send_message(
+                (
+                    f"❌ Queue #{number} not found"
+                    if number is not None
+                    else "❌ No queues generated yet. Use `/generate` first."
+                )
+            )
+            return
 
         name_map = {
-
             "CARD":
                 "🃏 Card",
-
             "FEATHER_S":
                 "🌗 Light-Dark",
-
             "FEATHER_A":
                 "⏳ Time-Space"
-
         }
 
+        queues = {}
+        for row in data:
+            queues.setdefault(row["queue_no"], {}).setdefault(
+                row["reward_type"], []
+            ).append(row)
 
+        sections = []
+        for queue_no, reward_groups in queues.items():
+            lines = [f"📋 Queue #{queue_no}"]
+            for reward, rows in reward_groups.items():
+                lines.append(
+                    f"{name_map.get(reward, reward)} — "
+                    f"{self.group_slots(rows)}"
+                )
+            sections.append("\n".join(lines))
 
-        for reward, rows in reward_group.items():
+        chunks = []
+        current = ""
+        for section in sections:
+            candidate = f"{current}\n\n{section}".strip()
+            if current and len(candidate) > 1900:
+                chunks.append(current)
+                current = section
+            else:
+                current = candidate
+        if current:
+            chunks.append(current)
 
-
-            text = self.group_slots(
-                rows
-            )
-
-
-            embed.add_field(
-
-                name=name_map.get(
-                    reward,
-                    reward
-                ),
-
-                value=text,
-
-                inline=False
-
-            )
-
-
-
-        await interaction.response.send_message(
-
-            embed=embed
-
-        )
+        await interaction.response.send_message(chunks[0])
+        for chunk in chunks[1:]:
+            await interaction.followup.send(chunk)
 
 
 
