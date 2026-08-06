@@ -11,28 +11,33 @@ bot = commands.Bot(
     intents=intents
 )
 
+commands_synced = False
+
 
 @bot.event
 async def on_ready():
+    global commands_synced
+
     print(f"Bot Online : {bot.user}")
 
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} commands")
+    if commands_synced:
+        return
 
-    except Exception as e:
-        print(e)
+    if not bot.guilds:
+        print("No Discord servers found for this bot")
+        return
+
+    for guild in bot.guilds:
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"Synced {len(synced)} commands to {guild.name} ({guild.id})")
+
+    commands_synced = True
 
 
 async def load_extensions():
-
-    await bot.load_extension(
-        "cogs.admin"
-    )
-
-    await bot.load_extension(
-        "cogs.queue"
-    )
+    await bot.load_extension("cogs.admin")
+    await bot.load_extension("cogs.queue")
 
 
 async def main():
