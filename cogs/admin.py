@@ -19,6 +19,14 @@ class Admin(commands.Cog):
 
         self.bot = bot
 
+    @staticmethod
+    def reward_name(reward):
+        return {
+            "CARD": "Card",
+            "FEATHER_S": "Light-Dark",
+            "FEATHER_A": "Time-Space"
+        }.get(reward, reward)
+
 
 
     @discord.app_commands.command(
@@ -28,15 +36,15 @@ class Admin(commands.Cog):
     @discord.app_commands.choices(
         reward=[
             discord.app_commands.Choice(
-                name="CARD",
+                name="Card",
                 value="CARD"
             ),
             discord.app_commands.Choice(
-                name="FEATHER_S",
+                name="Light-Dark",
                 value="FEATHER_S"
             ),
             discord.app_commands.Choice(
-                name="FEATHER_A",
+                name="Time-Space",
                 value="FEATHER_A"
             )
         ]
@@ -79,7 +87,7 @@ class Admin(commands.Cog):
         )
 
         await interaction.response.send_message(
-            f"✅ {reward} stock updated to {stock}\n"
+            f"✅ {self.reward_name(reward)} stock updated to {stock}\n"
             "Use `/setlimit` to change the limit per queue."
         )
 
@@ -90,15 +98,15 @@ class Admin(commands.Cog):
     @discord.app_commands.choices(
         reward=[
             discord.app_commands.Choice(
-                name="CARD",
+                name="Card",
                 value="CARD"
             ),
             discord.app_commands.Choice(
-                name="FEATHER_S",
+                name="Light-Dark",
                 value="FEATHER_S"
             ),
             discord.app_commands.Choice(
-                name="FEATHER_A",
+                name="Time-Space",
                 value="FEATHER_A"
             )
         ]
@@ -141,7 +149,7 @@ class Admin(commands.Cog):
         )
 
         await interaction.response.send_message(
-            f"✅ {reward} limit per queue updated to {limit}\n"
+            f"✅ {self.reward_name(reward)} limit per queue updated to {limit}\n"
             "Use `/setstock` to change the total stock."
         )
 

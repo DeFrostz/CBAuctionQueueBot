@@ -157,10 +157,10 @@ class Queue(commands.Cog):
                 "🃏 Card",
 
             "FEATHER_S":
-                "🪶 Feather (S)",
+                "🌗 Light-Dark",
 
             "FEATHER_A":
-                "🪶 Feather (A)"
+                "⏳ Time-Space"
 
         }
 
