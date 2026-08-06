@@ -75,6 +75,25 @@ class Queue(commands.Cog):
 
         return "\n".join(result)
 
+    def group_position_range(self, start_index, amount):
+        pages = {}
+
+        for index in range(start_index, start_index + amount):
+            page = index // 4 + 1
+            slot = index % 4 + 1
+            pages.setdefault(page, []).append(slot)
+
+        result = []
+        for page, slots in pages.items():
+            if len(slots) == 1:
+                slot_text = str(slots[0])
+            else:
+                slot_text = f"{slots[0]}-{slots[-1]}"
+
+            result.append(f"Page {page} : Slot {slot_text}")
+
+        return "\n".join(result)
+
     @discord.app_commands.command(
         name="extra",
         description="View rewards that are not assigned to a queue"
@@ -113,10 +132,26 @@ class Queue(commands.Cog):
             else:
                 assigned = queue_count * row["limit_per_queue"]
                 extra = max(row["stock"] - assigned, 0)
+                if extra == 0:
+                    positions = "None"
+                else:
+                    start_index = assigned
+                    if reward == "FEATHER_A":
+                        feather_s = rewards.get("FEATHER_S")
+                        start_index = (
+                            (feather_s["stock"] if feather_s else 0)
+                            + assigned
+                        )
+                    positions = self.group_position_range(
+                        start_index,
+                        extra
+                    )
+
                 value = (
                     f"Stock: {row['stock']}\n"
                     f"In queues: {assigned}\n"
-                    f"Extra: **{extra}**"
+                    f"Extra: **{extra}**\n"
+                    f"Positions:\n{positions}"
                 )
 
             embed.add_field(
