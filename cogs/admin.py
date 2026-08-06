@@ -25,14 +25,30 @@ class Admin(commands.Cog):
         name="setstock",
         description="Set the total stock for a reward"
     )
+    @discord.app_commands.choices(
+        reward=[
+            discord.app_commands.Choice(
+                name="CARD",
+                value="CARD"
+            ),
+            discord.app_commands.Choice(
+                name="FEATHER_S",
+                value="FEATHER_S"
+            ),
+            discord.app_commands.Choice(
+                name="FEATHER_A",
+                value="FEATHER_A"
+            )
+        ]
+    )
     @discord.app_commands.describe(
-        reward="CARD / FEATHER_S / FEATHER_A",
+        reward="Choose one of the 3 rewards",
         stock="Total amount available"
     )
     async def setstock(
         self,
         interaction: discord.Interaction,
-        reward: str,
+        reward: discord.app_commands.Choice[str],
         stock: int
     ):
         if interaction.guild is None:
@@ -42,7 +58,7 @@ class Admin(commands.Cog):
             return
 
         guild_id = str(interaction.guild.id)
-        reward = reward.upper()
+        reward = reward.value
 
         if reward not in ("CARD", "FEATHER_S", "FEATHER_A"):
             await interaction.response.send_message(
@@ -71,14 +87,30 @@ class Admin(commands.Cog):
         name="setlimit",
         description="Set the reward limit per queue"
     )
+    @discord.app_commands.choices(
+        reward=[
+            discord.app_commands.Choice(
+                name="CARD",
+                value="CARD"
+            ),
+            discord.app_commands.Choice(
+                name="FEATHER_S",
+                value="FEATHER_S"
+            ),
+            discord.app_commands.Choice(
+                name="FEATHER_A",
+                value="FEATHER_A"
+            )
+        ]
+    )
     @discord.app_commands.describe(
-        reward="CARD / FEATHER_S / FEATHER_A",
+        reward="Choose one of the 3 rewards",
         limit="Amount used in each queue"
     )
     async def setlimit(
         self,
         interaction: discord.Interaction,
-        reward: str,
+        reward: discord.app_commands.Choice[str],
         limit: int
     ):
         if interaction.guild is None:
@@ -88,7 +120,7 @@ class Admin(commands.Cog):
             return
 
         guild_id = str(interaction.guild.id)
-        reward = reward.upper()
+        reward = reward.value
 
         if reward not in ("CARD", "FEATHER_S", "FEATHER_A"):
             await interaction.response.send_message(
