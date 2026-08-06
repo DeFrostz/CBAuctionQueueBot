@@ -15,11 +15,21 @@ bot = commands.Bot(
 commands_synced = False
 
 
+async def sync_guild_commands(guild):
+    bot.tree.copy_global_to(guild=guild)
+    synced = await bot.tree.sync(guild=guild)
+    print(f"Synced {len(synced)} commands to {guild.name} ({guild.id})")
+
+
 @bot.event
 async def on_ready():
     global commands_synced
 
     print(f"Bot Online : {bot.user}")
+    print(
+        f"Connected to {len(bot.guilds)} server(s): "
+        f"{', '.join(guild.name for guild in bot.guilds) or 'none'}"
+    )
 
     if commands_synced:
         return
@@ -29,11 +39,14 @@ async def on_ready():
         return
 
     for guild in bot.guilds:
-        bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        print(f"Synced {len(synced)} commands to {guild.name} ({guild.id})")
+        await sync_guild_commands(guild)
 
     commands_synced = True
+
+
+@bot.event
+async def on_guild_join(guild):
+    await sync_guild_commands(guild)
 
 
 async def load_extensions():
