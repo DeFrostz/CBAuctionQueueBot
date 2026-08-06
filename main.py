@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 
 from config import TOKEN
+from database import init_database
 
 
 intents = discord.Intents.default()
@@ -41,6 +42,8 @@ async def load_extensions():
 
 
 async def main():
+
+    init_database()
 
     async with bot:
 

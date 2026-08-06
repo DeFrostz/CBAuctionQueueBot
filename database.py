@@ -122,6 +122,49 @@ def save_reward(
     conn.close()
 
 
+def set_reward_stock(guild_id, reward_type, stock):
+    conn = get_connection()
+    conn.execute("""
+    INSERT INTO rewards
+    (
+        guild_id,
+        reward_type,
+        stock,
+        limit_per_queue
+    )
+    VALUES (?, ?, ?, 0)
+    ON CONFLICT(guild_id, reward_type)
+    DO UPDATE SET stock=excluded.stock
+    """, (
+        guild_id,
+        reward_type,
+        stock
+    ))
+    conn.commit()
+    conn.close()
+
+
+def set_reward_limit(guild_id, reward_type, limit_per_queue):
+    conn = get_connection()
+    conn.execute("""
+    INSERT INTO rewards
+    (
+        guild_id,
+        reward_type,
+        stock,
+        limit_per_queue
+    )
+    VALUES (?, ?, 0, ?)
+    ON CONFLICT(guild_id, reward_type)
+    DO UPDATE SET limit_per_queue=excluded.limit_per_queue
+    """, (
+        guild_id,
+        reward_type,
+        limit_per_queue
+    ))
+    conn.commit()
+    conn.close()
+
 
 def get_rewards(guild_id):
 

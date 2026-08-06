@@ -3,7 +3,8 @@ import discord
 from discord.ext import commands
 
 from database import (
-    save_reward,
+    set_reward_stock,
+    set_reward_limit,
     get_rewards
 )
 
@@ -20,81 +21,97 @@ class Admin(commands.Cog):
 
 
 
-    # -----------------------------
-    # /reward
-    # -----------------------------
-
     @discord.app_commands.command(
-        name="reward",
-        description="Set reward stock"
+        name="setstock",
+        description="Set the total stock for a reward"
     )
     @discord.app_commands.describe(
         reward="CARD / FEATHER_S / FEATHER_A",
-        stock="Amount of reward",
-        limit="Limit per queue"
+        stock="Total amount available"
     )
-    async def reward(
+    async def setstock(
         self,
         interaction: discord.Interaction,
-
         reward: str,
-
-        stock: int,
-
-        limit: int
-
+        stock: int
     ):
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "❌ This command can only be used in a server"
+            )
+            return
 
-
-        guild_id = str(
-            interaction.guild.id
-        )
-
-
+        guild_id = str(interaction.guild.id)
         reward = reward.upper()
 
-
-
-        if reward not in [
-            "CARD",
-            "FEATHER_S",
-            "FEATHER_A"
-        ]:
-
+        if reward not in ("CARD", "FEATHER_S", "FEATHER_A"):
             await interaction.response.send_message(
                 "❌ Reward type incorrect"
             )
-
             return
 
+        if stock < 0:
+            await interaction.response.send_message(
+                "❌ Stock must be 0 or greater"
+            )
+            return
 
-
-        save_reward(
+        set_reward_stock(
             guild_id,
             reward,
-            stock,
+            stock
+        )
+
+        await interaction.response.send_message(
+            f"✅ {reward} stock updated to {stock}\n"
+            "Use `/setlimit` to change the limit per queue."
+        )
+
+    @discord.app_commands.command(
+        name="setlimit",
+        description="Set the reward limit per queue"
+    )
+    @discord.app_commands.describe(
+        reward="CARD / FEATHER_S / FEATHER_A",
+        limit="Amount used in each queue"
+    )
+    async def setlimit(
+        self,
+        interaction: discord.Interaction,
+        reward: str,
+        limit: int
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "❌ This command can only be used in a server"
+            )
+            return
+
+        guild_id = str(interaction.guild.id)
+        reward = reward.upper()
+
+        if reward not in ("CARD", "FEATHER_S", "FEATHER_A"):
+            await interaction.response.send_message(
+                "❌ Reward type incorrect"
+            )
+            return
+
+        if limit < 1:
+            await interaction.response.send_message(
+                "❌ Limit per queue must be 1 or greater"
+            )
+            return
+
+        set_reward_limit(
+            guild_id,
+            reward,
             limit
         )
 
-
-
         await interaction.response.send_message(
-            f"""
-✅ Reward Updated
-
-🎁 {reward}
-
-Stock:
-{stock}
-
-Limit / Queue:
-{limit}
-"""
+            f"✅ {reward} limit per queue updated to {limit}\n"
+            "Use `/setstock` to change the total stock."
         )
-
-
-
-
 
     # -----------------------------
     # /generate
@@ -113,9 +130,13 @@ Limit / Queue:
     ):
 
 
-        guild_id = str(
-            interaction.guild.id
-        )
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "❌ This command can only be used in a server"
+            )
+            return
+
+        guild_id = str(interaction.guild.id)
 
 
         rewards = get_rewards(
@@ -123,16 +144,26 @@ Limit / Queue:
         )
 
 
-        if len(rewards) < 3:
+        reward_map = {
+            row["reward_type"]: row
+            for row in rewards
+        }
+        required_rewards = ("CARD", "FEATHER_S", "FEATHER_A")
 
-
+        if (
+            any(reward not in reward_map for reward in required_rewards)
+            or any(
+                reward_map[reward]["limit_per_queue"] < 1
+                for reward in required_rewards
+            )
+        ):
             await interaction.response.send_message(
                 """
-❌ Please setup all rewards first
+❌ Please set stock and a limit of 1 or more for all rewards first
 
-CARD
-FEATHER_S
-FEATHER_A
+Use:
+/setstock <reward> <stock>
+/setlimit <reward> <limit>
 """
             )
 
