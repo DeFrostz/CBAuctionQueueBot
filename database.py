@@ -269,3 +269,19 @@ def get_queue(
     conn.close()
 
     return result
+
+
+def get_queue_count(guild_id):
+    conn = get_connection()
+
+    result = conn.execute("""
+        SELECT COALESCE(MAX(queue_no), 0)
+        FROM queue_plan
+        WHERE guild_id=?
+    """, (
+        guild_id,
+    )).fetchone()
+
+    conn.close()
+
+    return result[0]
