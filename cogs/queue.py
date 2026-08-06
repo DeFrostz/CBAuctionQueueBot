@@ -209,6 +209,7 @@ class Queue(commands.Cog):
             "FEATHER_A":
                 "⏳ Time-Space"
         }
+        reward_order = ("CARD", "FEATHER_S", "FEATHER_A")
 
         queues = {}
         for row in data:
@@ -219,8 +220,11 @@ class Queue(commands.Cog):
         sections = []
         for queue_no, reward_groups in queues.items():
             lines = [f"📋 Queue #{queue_no}"]
-            for reward, rows in reward_groups.items():
-                lines.append(f"{name_map.get(reward, reward)} —")
+            for reward in reward_order:
+                rows = reward_groups.get(reward)
+                if not rows:
+                    continue
+                lines.append(name_map.get(reward, reward))
                 lines.extend(
                     f"- {position}"
                     for position in self.group_slots(rows).splitlines()
