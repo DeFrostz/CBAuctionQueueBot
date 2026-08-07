@@ -2,12 +2,15 @@ import discord
 
 from discord.ext import commands
 
+import asyncio
+
 from database import (
     set_reward_stock,
     set_reward_limit,
     get_rewards,
     CATEGORIES,
 )
+from generator import generate_queue
 
 
 LINKED = ("Guild League", "League Prize")
@@ -333,12 +336,20 @@ class Admin(commands.Cog):
                 )
                 return
 
-        # Run generator per category
+        # Acknowledge interaction to avoid Discord timeout and run generation in background
+        await interaction.response.defer(thinking=True)
+
+        # Run generator per category in a thread to avoid blocking the event loop
         results = {}
-        for cat in to_generate:
-            rows = get_rewards(guild_id, cat)
-            cnt = generate_queue(guild_id, rows)
-            results[cat] = cnt
+        try:
+            for cat in to_generate:
+                rows = get_rewards(guild_id, cat)
+                cnt = await asyncio.to_thread(generate_queue, guild_id, rows)
+                results[cat] = cnt
+        except Exception as e:
+            print("Error generating queues:", e)
+            await interaction.followup.send(f"❌ Failed to generate queue: {e}")
+            return
 
         # Build reply text
         lines = ["✅ Queue Generated", "", "Total queues per category:"]
@@ -348,7 +359,7 @@ class Admin(commands.Cog):
         lines.append("")
         lines.append("Use: /queue <number> to view queue")
 
-        await interaction.response.send_message("\n".join(lines))
+        await interaction.followup.send("\n".join(lines))
 
 
 async def setup(bot):
