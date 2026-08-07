@@ -177,9 +177,9 @@ def get_rewards(guild_id, category=CATEGORIES[0]):
     conn = get_connection()
     cursor = conn.cursor()
     if category is None:
-        result = cursor.execute("SELECT * FROM rewards WHERE guild_id=?", (guild_id,)).fetchall()
+        result = cursor.execute("SELECT * FROM rewards WHERE guild_id= ?", (guild_id,)).fetchall()
     else:
-        result = cursor.execute("SELECT * FROM rewards WHERE guild_id=? AND category=?", (guild_id, category)).fetchall()
+        result = cursor.execute("SELECT * FROM rewards WHERE guild_id= ? AND category= ?", (guild_id, category)).fetchall()
     conn.close()
     return result
 
@@ -212,23 +212,32 @@ def save_queue_position(guild_id, queue_no, reward_type, page, slot, category=CA
     conn.close()
 
 
-def get_queue(guild_id, queue_no):
+def get_queue(guild_id, queue_no, category=None):
     conn = get_connection()
-    result = conn.execute("SELECT * FROM queue_plan WHERE guild_id=? AND queue_no=? ORDER BY category, reward_type, page, slot", (guild_id, queue_no)).fetchall()
+    if category is None:
+        result = conn.execute("SELECT * FROM queue_plan WHERE guild_id=? AND queue_no=? ORDER BY category, reward_type, page, slot", (guild_id, queue_no)).fetchall()
+    else:
+        result = conn.execute("SELECT * FROM queue_plan WHERE guild_id=? AND category=? AND queue_no=? ORDER BY reward_type, page, slot", (guild_id, category, queue_no)).fetchall()
     conn.close()
     return result
 
 
-def get_all_queue(guild_id):
+def get_all_queue(guild_id, category=None):
     conn = get_connection()
-    result = conn.execute("SELECT * FROM queue_plan WHERE guild_id=? ORDER BY queue_no, category, reward_type, page, slot", (guild_id,)).fetchall()
+    if category is None:
+        result = conn.execute("SELECT * FROM queue_plan WHERE guild_id=? ORDER BY queue_no, category, reward_type, page, slot", (guild_id,)).fetchall()
+    else:
+        result = conn.execute("SELECT * FROM queue_plan WHERE guild_id=? AND category=? ORDER BY queue_no, reward_type, page, slot", (guild_id, category)).fetchall()
     conn.close()
     return result
 
 
-def get_queue_count(guild_id):
+def get_queue_count(guild_id, category=None):
     conn = get_connection()
-    result = conn.execute("SELECT COALESCE(MAX(queue_no), 0) FROM queue_plan WHERE guild_id=?", (guild_id,)).fetchone()
+    if category is None:
+        result = conn.execute("SELECT COALESCE(MAX(queue_no), 0) FROM queue_plan WHERE guild_id=?", (guild_id,)).fetchone()
+    else:
+        result = conn.execute("SELECT COALESCE(MAX(queue_no), 0) FROM queue_plan WHERE guild_id=? AND category=?", (guild_id, category)).fetchone()
     conn.close()
     return result[0]
 
