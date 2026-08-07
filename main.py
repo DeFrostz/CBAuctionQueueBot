@@ -1,3 +1,4 @@
+import os
 import discord
 from discord.ext import commands
 
@@ -14,11 +15,30 @@ bot = commands.Bot(
 
 commands_synced = False
 
+SYNC_GUILD_ID = os.environ.get("SYNC_GUILD_ID")
+
 
 async def sync_guild_commands(guild):
     bot.tree.copy_global_to(guild=guild)
     synced = await bot.tree.sync(guild=guild)
-    print(f"Synced {len(synced)} commands to {guild.name} ({guild.id})")
+    print(f"Synced {len(synced)} commands to {getattr(guild, 'name', guild)} ({getattr(guild, 'id', guild)})")
+
+
+async def sync_to_guild_id(guild_id_str: str):
+    """Force a guild-scoped sync using an ID string from env var. Useful for dev/testing so commands appear immediately."""
+    try:
+        gid = int(guild_id_str)
+    except Exception as e:
+        print(f"SYNC_GUILD_ID is invalid: {e}")
+        return
+    # Create a lightweight Guild-like object for logging (we may not have the full Guild until the bot is in it)
+    obj = discord.Object(id=gid)
+    try:
+        bot.tree.copy_global_to(guild=obj)
+        synced = await bot.tree.sync(guild=obj)
+        print(f"Synced {len(synced)} commands to guild id {gid}")
+    except Exception as e:
+        print(f"Failed to sync commands to guild id {gid}: {e}")
 
 
 @bot.event
@@ -32,6 +52,12 @@ async def on_ready():
     )
 
     if commands_synced:
+        return
+
+    # If a specific SYNC_GUILD_ID is set, force a sync to that guild for immediate testing
+    if SYNC_GUILD_ID:
+        await sync_to_guild_id(SYNC_GUILD_ID)
+        commands_synced = True
         return
 
     if not bot.guilds:
