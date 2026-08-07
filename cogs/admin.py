@@ -292,6 +292,67 @@ class Admin(commands.Cog):
         )
 
     # -----------------------------
+    # /clearqueues
+    # -----------------------------
+
+    @discord.app_commands.command(
+        name="clearqueues",
+        description="Clear generated auction queues"
+    )
+    @discord.app_commands.choices(
+        category=[
+            discord.app_commands.Choice(name=cat, value=cat)
+            for cat in (*CATEGORIES, "All")
+        ]
+    )
+    @discord.app_commands.describe(
+        category="Which category to clear, or All"
+    )
+    async def clearqueues(
+        self,
+        interaction: discord.Interaction,
+        category: discord.app_commands.Choice[str] | None = None
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "❌ This command can only be used in a server",
+                ephemeral=True
+            )
+            return
+
+        # Security check
+        if not (
+            interaction.user.guild_permissions.administrator
+            or await self.bot.is_owner(interaction.user)
+        ):
+            await interaction.response.send_message(
+                "❌ You need Administrator permission to use this command.",
+                ephemeral=True
+            )
+            return
+
+        guild_id = str(interaction.guild.id)
+
+        category_value = (
+            category.value
+            if category is not None
+            else "All"
+        )
+
+        if category_value == "All":
+            clear_queue(guild_id)
+            message = "all categories"
+        else:
+            clear_queue(
+                guild_id,
+                category_value
+            )
+            message = f"**{category_value}**"
+
+        await interaction.response.send_message(
+            f"🗑️ Cleared queues for {message}."
+        )
+    # -----------------------------
     # /generate
     # -----------------------------
 

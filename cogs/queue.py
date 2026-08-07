@@ -6,8 +6,9 @@ from database import (
     get_all_queue,
     get_queue,
     get_queue_count,
-    get_rewards
-) 
+    get_rewards,
+    CATEGORIES
+)
 
 
 class Queue(commands.Cog):
@@ -99,7 +100,10 @@ class Queue(commands.Cog):
         name="extra",
         description="View rewards that are not assigned to a queue"
     )
-    async def extra(self, interaction: discord.Interaction):
+    async def extra(
+        self,
+        interaction: discord.Interaction
+    ):
         if interaction.guild is None:
             await interaction.response.send_message(
                 "❌ This command can only be used in a server"
@@ -107,12 +111,13 @@ class Queue(commands.Cog):
             return
 
         guild_id = str(interaction.guild.id)
-        rewards = {
-            row["reward_type"]: row
-            for row in get_rewards(guild_id)
-        }
-        queue_count = get_queue_count(guild_id)
-        reward_order = ("CARD", "FEATHER_S", "FEATHER_A")
+
+        reward_order = (
+            "CARD",
+            "FEATHER_S",
+            "FEATHER_A"
+        )
+
         reward_names = {
             "CARD": "🃏 Card",
             "FEATHER_S": "🌗 Light-Dark",
@@ -121,34 +126,79 @@ class Queue(commands.Cog):
 
         embed = discord.Embed(
             title="📦 Extra Rewards",
-            description=(
-                f"Rewards not assigned to the current {queue_count} queue(s)"
-            )
+            description="Rewards not assigned to queues"
         )
 
-        for reward in reward_order:
-            row = rewards.get(reward)
-            if row is None:
-                value = "Not configured"
-            else:
-                assigned = queue_count * row["limit_per_queue"]
-                extra = max(row["stock"] - assigned, 0)
+        for category in CATEGORIES:
+
+            rewards = {
+                row["reward_type"]: row
+                for row in get_rewards(
+                    guild_id,
+                    category
+                )
+            }
+
+            queue_count = get_queue_count(
+                guild_id,
+                category
+            )
+
+            category_lines = [
+                f"**Queues: {queue_count}**"
+            ]
+
+            for reward in reward_order:
+
+                row = rewards.get(reward)
+
+                if row is None:
+                    category_lines.append(
+                        f"{reward_names[reward]}\n"
+                        "Not configured"
+                    )
+                    continue
+
+                assigned = (
+                    queue_count
+                    * row["limit_per_queue"]
+                )
+
+                extra = max(
+                    row["stock"] - assigned,
+                    0
+                )
+
                 if extra == 0:
+
                     positions = "None"
+
                 else:
+
                     start_index = assigned
+
+                    # Feather A starts after all Feather S
                     if reward == "FEATHER_A":
-                        feather_s = rewards.get("FEATHER_S")
-                        start_index = (
-                            (feather_s["stock"] if feather_s else 0)
-                            + assigned
+
+                        feather_s = rewards.get(
+                            "FEATHER_S"
                         )
-                    positions = self.group_position_range(
-                        start_index,
-                        extra
+
+                        start_index = (
+                            feather_s["stock"]
+                            if feather_s
+                            else 0
+                        ) + assigned
+
+                    positions = (
+                        self.group_position_range(
+                            start_index,
+                            extra
+                        )
                     )
 
-                value = (
+                category_lines.append(
+                    f"{reward_names[reward]}\n"
                     f"Stock: {row['stock']}\n"
                     f"In queues: {assigned}\n"
                     f"Extra: **{extra}**\n"
@@ -156,15 +206,14 @@ class Queue(commands.Cog):
                 )
 
             embed.add_field(
-                name=reward_names[reward],
-                value=value,
+                name=f"📂 {category}",
+                value="\n\n".join(category_lines),
                 inline=False
             )
 
-        await interaction.response.send_message(embed=embed)
-
-
-
+        await interaction.response.send_message(
+            embed=embed
+        )
 
     @discord.app_commands.command(
         name="queuelist",
