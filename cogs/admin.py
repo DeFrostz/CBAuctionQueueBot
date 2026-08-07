@@ -9,6 +9,7 @@ from database import (
     set_reward_limit,
     get_rewards,
     clear_queue,
+    clear_rewards,
     CATEGORIES,
 )
 
@@ -468,6 +469,65 @@ class Admin(commands.Cog):
 
             await interaction.followup.send(f"❌ Failed to generate queue: {e}")
 
+
+    # -----------------------------
+    # /clearconfig
+    # -----------------------------
+    
+    @discord.app_commands.command(
+        name="clearconfig",
+        description="Clear stock, limits and generated queues",
+    )
+    @discord.app_commands.choices(
+        category=[
+            discord.app_commands.Choice(name=cat, value=cat)
+            for cat in (*CATEGORIES, "All")
+        ]
+    )
+    async def clearconfig(
+        self,
+        interaction: discord.Interaction,
+        category: discord.app_commands.Choice[str] | None = None,
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "❌ This command can only be used in a server.",
+                ephemeral=True,
+            )
+            return
+    
+        guild_id = str(interaction.guild.id)
+    
+        category_value = (
+            category.value
+            if category is not None
+            else "All"
+        )
+    
+        if category_value == "All":
+            targets = list(CATEGORIES)
+    
+        elif category_value in LINKED:
+            targets = list(LINKED)
+    
+        else:
+            targets = [category_value]
+    
+        for target in targets:
+            clear_rewards(
+                guild_id,
+                target,
+            )
+    
+            clear_queue(
+                guild_id,
+                target,
+            )
+    
+        await interaction.response.send_message(
+            "✅ Configuration cleared\n\n"
+            f"Category: {', '.join(targets)}"
+        )
 
 async def setup(bot):
     await bot.add_cog(Admin(bot))

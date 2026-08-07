@@ -342,3 +342,20 @@ def save_reward(guild_id, reward_type, stock, limit_per_queue):
 
 def get_all_rewards(guild_id):
     return get_rewards(guild_id, category=None)
+
+def clear_rewards(guild_id, category=None):
+    conn = get_connection()
+
+    if category is None:
+        conn.execute(
+            "DELETE FROM rewards WHERE guild_id=?",
+            (guild_id,),
+        )
+    else:
+        conn.execute(
+            "DELETE FROM rewards WHERE guild_id=? AND category=?",
+            (guild_id, category),
+        )
+
+    conn.commit()
+    conn.close()
