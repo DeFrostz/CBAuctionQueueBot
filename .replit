@@ -27,3 +27,8 @@ outputType = "console"
 [deployment]
 deploymentTarget = "vm"
 run = ["python", "main.py"]
+
+[userenv]
+
+[userenv.shared]
+SYNC_GUILD_IDS = " 1485258406595133581,1534945744048357426"
