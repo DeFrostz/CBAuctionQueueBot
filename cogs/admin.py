@@ -70,8 +70,7 @@ class Admin(commands.Cog):
             "✅ All reward stock updated\n"
             f"🃏 Card: {card}\n"
             f"🌗 Light-Dark: {light_dark}\n"
-            f"⏳ Time-Space: {time_space}\n"
-            "Queue limits were not changed."
+            f"⏳ Time-Space: {time_space}"
         )
 
 
@@ -117,8 +116,7 @@ class Admin(commands.Cog):
             "✅ All queue limits updated\n"
             f"🃏 Card: {card}\n"
             f"🌗 Light-Dark: {light_dark}\n"
-            f"⏳ Time-Space: {time_space}\n"
-            "Stock amounts were not changed."
+            f"⏳ Time-Space: {time_space}"
         )
 
 

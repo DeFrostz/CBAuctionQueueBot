@@ -167,7 +167,7 @@ class Queue(commands.Cog):
 
 
     @discord.app_commands.command(
-        name="queue",
+        name="queuelist",
         description="View all queues or one specific queue"
     )
     @discord.app_commands.describe(
