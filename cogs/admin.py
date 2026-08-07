@@ -5,18 +5,22 @@ from discord.ext import commands
 from database import (
     set_reward_stock,
     set_reward_limit,
-    get_rewards
+    get_rewards,
+    get_all_rewards,
+    CATEGORIES,
 )
 
 from generator import (
-    generate_queue
+    generate_queues,
 )
+
+
+LINKED = ("Guild League", "League Prize")
 
 
 class Admin(commands.Cog):
 
     def __init__(self, bot):
-
         self.bot = bot
 
     @staticmethod
@@ -32,17 +36,24 @@ class Admin(commands.Cog):
         name="setallstock",
         description="Set stock for all three rewards at once"
     )
+    @discord.app_commands.choices(
+        category=[
+            discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")
+        ]
+    )
     @discord.app_commands.describe(
         card="Total Card stock",
         light_dark="Total Light-Dark stock",
-        time_space="Total Time-Space stock"
+        time_space="Total Time-Space stock",
+        category="Which category to apply (Guild League default)"
     )
     async def setallstock(
         self,
         interaction: discord.Interaction,
         card: int,
         light_dark: int,
-        time_space: int
+        time_space: int,
+        category: discord.app_commands.Choice[str] | None = None
     ):
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -63,14 +74,24 @@ class Admin(commands.Cog):
             return
 
         guild_id = str(interaction.guild.id)
-        for reward, stock in stock_values.items():
-            set_reward_stock(guild_id, reward, stock)
+        category_value = (category.value if category is not None else CATEGORIES[0])
+
+        targets = []
+        if category_value == "All":
+            targets = list(CATEGORIES)
+        else:
+            targets = [category_value]
+
+        for target in targets:
+            for reward, stock in stock_values.items():
+                set_reward_stock(guild_id, reward, stock, target)
 
         await interaction.response.send_message(
             "✅ All reward stock updated\n"
             f"🃏 Card: {card}\n"
             f"🌗 Light-Dark: {light_dark}\n"
-            f"⏳ Time-Space: {time_space}"
+            f"⏳ Time-Space: {time_space}\n"
+            f"Applied to: {', '.join(targets)}"
         )
 
 
@@ -78,17 +99,24 @@ class Admin(commands.Cog):
         name="setalllimit",
         description="Set limits for all three rewards at once"
     )
+    @discord.app_commands.choices(
+        category=[
+            discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")
+        ]
+    )
     @discord.app_commands.describe(
         card="Card amount per queue",
         light_dark="Light-Dark amount per queue",
-        time_space="Time-Space amount per queue"
+        time_space="Time-Space amount per queue",
+        category="Which category to apply (Guild League default). Guild League and League Prize are linked."
     )
     async def setalllimit(
         self,
         interaction: discord.Interaction,
         card: int,
         light_dark: int,
-        time_space: int
+        time_space: int,
+        category: discord.app_commands.Choice[str] | None = None
     ):
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -109,16 +137,27 @@ class Admin(commands.Cog):
             return
 
         guild_id = str(interaction.guild.id)
-        for reward, limit in limit_values.items():
-            set_reward_limit(guild_id, reward, limit)
+        category_value = (category.value if category is not None else CATEGORIES[0])
+
+        targets = []
+        if category_value == "All":
+            targets = list(CATEGORIES)
+        elif category_value in LINKED:
+            targets = list(LINKED)
+        else:
+            targets = [category_value]
+
+        for target in targets:
+            for reward, limit in limit_values.items():
+                set_reward_limit(guild_id, reward, limit, target)
 
         await interaction.response.send_message(
             "✅ All queue limits updated\n"
             f"🃏 Card: {card}\n"
             f"🌗 Light-Dark: {light_dark}\n"
-            f"⏳ Time-Space: {time_space}"
+            f"⏳ Time-Space: {time_space}\n"
+            f"Applied to: {', '.join(targets)}"
         )
-
 
 
     @discord.app_commands.command(
@@ -127,29 +166,25 @@ class Admin(commands.Cog):
     )
     @discord.app_commands.choices(
         reward=[
-            discord.app_commands.Choice(
-                name="Card",
-                value="CARD"
-            ),
-            discord.app_commands.Choice(
-                name="Light-Dark",
-                value="FEATHER_S"
-            ),
-            discord.app_commands.Choice(
-                name="Time-Space",
-                value="FEATHER_A"
-            )
+            discord.app_commands.Choice(name="Card", value="CARD"),
+            discord.app_commands.Choice(name="Light-Dark", value="FEATHER_S"),
+            discord.app_commands.Choice(name="Time-Space", value="FEATHER_A"),
+        ],
+        category=[
+            discord.app_commands.Choice(name=cat, value=cat) for cat in CATEGORIES
         ]
     )
     @discord.app_commands.describe(
         reward="Choose one of the 3 rewards",
-        stock="Total amount available"
+        stock="Total amount available",
+        category="Which category to set (Guild League default)"
     )
     async def setstock(
         self,
         interaction: discord.Interaction,
         reward: discord.app_commands.Choice[str],
-        stock: int
+        stock: int,
+        category: discord.app_commands.Choice[str] | None = None
     ):
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -159,6 +194,7 @@ class Admin(commands.Cog):
 
         guild_id = str(interaction.guild.id)
         reward = reward.value
+        category_value = (category.value if category is not None else CATEGORIES[0])
 
         if reward not in ("CARD", "FEATHER_S", "FEATHER_A"):
             await interaction.response.send_message(
@@ -175,11 +211,12 @@ class Admin(commands.Cog):
         set_reward_stock(
             guild_id,
             reward,
-            stock
+            stock,
+            category_value
         )
 
         await interaction.response.send_message(
-            f"✅ {self.reward_name(reward)} stock updated to {stock}\n"
+            f"✅ {self.reward_name(reward)} stock updated to {stock} for {category_value}\n"
             "Use `/setlimit` to change the limit per queue."
         )
 
@@ -189,29 +226,25 @@ class Admin(commands.Cog):
     )
     @discord.app_commands.choices(
         reward=[
-            discord.app_commands.Choice(
-                name="Card",
-                value="CARD"
-            ),
-            discord.app_commands.Choice(
-                name="Light-Dark",
-                value="FEATHER_S"
-            ),
-            discord.app_commands.Choice(
-                name="Time-Space",
-                value="FEATHER_A"
-            )
+            discord.app_commands.Choice(name="Card", value="CARD"),
+            discord.app_commands.Choice(name="Light-Dark", value="FEATHER_S"),
+            discord.app_commands.Choice(name="Time-Space", value="FEATHER_A"),
+        ],
+        category=[
+            discord.app_commands.Choice(name=cat, value=cat) for cat in CATEGORIES
         ]
     )
     @discord.app_commands.describe(
         reward="Choose one of the 3 rewards",
-        limit="Amount used in each queue"
+        limit="Amount used in each queue",
+        category="Which category to set (Guild League default). Guild League and League Prize are linked."
     )
     async def setlimit(
         self,
         interaction: discord.Interaction,
         reward: discord.app_commands.Choice[str],
-        limit: int
+        limit: int,
+        category: discord.app_commands.Choice[str] | None = None
     ):
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -221,6 +254,7 @@ class Admin(commands.Cog):
 
         guild_id = str(interaction.guild.id)
         reward = reward.value
+        category_value = (category.value if category is not None else CATEGORIES[0])
 
         if reward not in ("CARD", "FEATHER_S", "FEATHER_A"):
             await interaction.response.send_message(
@@ -234,14 +268,27 @@ class Admin(commands.Cog):
             )
             return
 
-        set_reward_limit(
-            guild_id,
-            reward,
-            limit
-        )
+        # If setting for Guild League OR League Prize, set both to keep them equal
+        if category_value in LINKED:
+            for cat in LINKED:
+                set_reward_limit(
+                    guild_id,
+                    reward,
+                    limit,
+                    cat
+                )
+            applied = ", ".join(LINKED)
+        else:
+            set_reward_limit(
+                guild_id,
+                reward,
+                limit,
+                category_value
+            )
+            applied = category_value
 
         await interaction.response.send_message(
-            f"✅ {self.reward_name(reward)} limit per queue updated to {limit}\n"
+            f"✅ {self.reward_name(reward)} limit per queue updated to {limit} for {applied}\n"
             "Use `/setstock` to change the total stock."
         )
 
@@ -253,15 +300,16 @@ class Admin(commands.Cog):
         name="generate",
         description="Generate auction queue"
     )
+    @discord.app_commands.choices(
+        category=[
+            discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")
+        ]
+    )
     async def generate(
-
         self,
-
-        interaction: discord.Interaction
-
+        interaction: discord.Interaction,
+        category: discord.app_commands.Choice[str] | None = None
     ):
-
-
         if interaction.guild is None:
             await interaction.response.send_message(
                 "❌ This command can only be used in a server"
@@ -269,69 +317,40 @@ class Admin(commands.Cog):
             return
 
         guild_id = str(interaction.guild.id)
+        category_value = (category.value if category is not None else CATEGORIES[0])
 
+        # Determine which categories we will generate (for validation)
+        if category_value == "All":
+            to_generate = list(CATEGORIES)
+        elif category_value in LINKED:
+            to_generate = list(LINKED)
+        else:
+            to_generate = [category_value]
 
-        rewards = get_rewards(
-            guild_id
-        )
+        # Validate each category has limits/configured
+        for cat in to_generate:
+            rows = get_rewards(guild_id, cat)
+            reward_map = {row["reward_type"]: row for row in rows}
+            required = ("CARD", "FEATHER_S", "FEATHER_A")
+            if any(r not in reward_map for r in required) or any(reward_map[r]["limit_per_queue"] < 1 for r in required):
+                await interaction.response.send_message(
+                    "❌ Please set stock and a limit of 1 or more for all rewards first\n\nUse:\n/setstock <reward> <stock> <category>\n/setlimit <reward> <limit> <category>"
+                )
+                return
 
+        # Run generator
+        result = generate_queues(guild_id, category_value)
 
-        reward_map = {
-            row["reward_type"]: row
-            for row in rewards
-        }
-        required_rewards = ("CARD", "FEATHER_S", "FEATHER_A")
+        # Build reply text
+        lines = ["✅ Queue Generated", "", "Total queues per category:"]
+        for cat, cnt in result.items():
+            lines.append(f"- {cat}: {cnt}")
 
-        if (
-            any(reward not in reward_map for reward in required_rewards)
-            or any(
-                reward_map[reward]["limit_per_queue"] < 1
-                for reward in required_rewards
-            )
-        ):
-            await interaction.response.send_message(
-                """
-❌ Please set stock and a limit of 1 or more for all rewards first
+        lines.append("")
+        lines.append("Use: /queue <number> to view queue")
 
-Use:
-/setstock <reward> <stock>
-/setlimit <reward> <limit>
-"""
-            )
-
-            return
-
-
-
-        count = generate_queue(
-            guild_id,
-            rewards
-        )
-
-
-
-        await interaction.response.send_message(
-
-            f"""
-✅ Queue Generated
-
-Total Queue:
-{count}
-
-Use:
-
-/queue <number>
-
-to view queue
-"""
-        )
-
-
-
+        await interaction.response.send_message("\n".join(lines))
 
 
 async def setup(bot):
-
-    await bot.add_cog(
-        Admin(bot)
-    )
+    await bot.add_cog(Admin(bot))
