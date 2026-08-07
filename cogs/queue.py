@@ -11,7 +11,7 @@ from database import (
 )
 
 
-# Guild League + League Prize ใช้ระบบ Queue ร่วมกัน
+# Guild League + League Prize share the same queue sequence
 LINKED = (
     "Guild League",
     "League Prize",
@@ -42,15 +42,15 @@ class Queue(commands.Cog):
 
     def group_slots(self, rows):
         """
-        รวม Slot ที่อยู่ Page เดียวกัน
+        Group slots that are on the same page.
 
-        ตัวอย่าง:
+        Example:
 
         Page 1 Slot 1
         Page 1 Slot 2
         Page 1 Slot 3
 
-        =>
+        ->
 
         Page 1 : Slot 1-3
         """
@@ -84,9 +84,9 @@ class Queue(commands.Cog):
         amount,
     ):
         """
-        Convert absolute index -> Page / Slot
+        Convert absolute item indexes to Page / Slot.
 
-        4 items per page
+        4 items per page.
         """
 
         if amount <= 0:
@@ -123,10 +123,10 @@ class Queue(commands.Cog):
         category,
     ):
         """
-        Category filter behavior:
+        /queuelist category behavior
 
-        None
-            -> ทุก Category
+        None / All
+            -> all categories
 
         Guild League
             -> Guild League + League Prize
@@ -135,10 +135,10 @@ class Queue(commands.Cog):
             -> Guild League + League Prize
 
         Emperium Overrun
-            -> Emperium Overrun only
+            -> Emperium only
 
         Designed Auction
-            -> Designed Auction only
+            -> Designed only
         """
 
         if category is None or category.value == "All":
@@ -150,6 +150,37 @@ class Queue(commands.Cog):
             return LINKED
 
         return (category_value,)
+
+    def build_queue_value(
+        self,
+        reward_groups,
+    ):
+        """
+        Build one queue's reward display.
+        """
+
+        value_lines = []
+
+        for reward in REWARD_ORDER:
+            rows = reward_groups.get(reward)
+
+            if not rows:
+                continue
+
+            value_lines.append(
+                REWARD_NAMES.get(
+                    reward,
+                    reward,
+                )
+            )
+
+            positions = self.group_slots(rows)
+
+            value_lines.extend(positions.splitlines())
+
+            value_lines.append("")
+
+        return "\n".join(value_lines).strip()
 
     # =========================================================
     # /extra
@@ -174,36 +205,34 @@ class Queue(commands.Cog):
 
         embed = discord.Embed(
             title="📦 Extra Rewards",
-            description=("Rewards not assigned to queues"),
+            description="Rewards not assigned to queues",
         )
 
-        for category in CATEGORIES:
+        for category_name in CATEGORIES:
             reward_rows = get_rewards(
                 guild_id,
-                category,
+                category_name,
             )
 
             rewards = {row["reward_type"]: row for row in reward_rows}
 
-            # ไม่มี config เลย
+            # Category has never been configured
             if not rewards:
                 embed.add_field(
-                    name=f"📂 {category}",
+                    name=f"📂 {category_name}",
                     value="Not configured",
                     inline=False,
                 )
 
                 continue
 
-            # สำคัญ:
-            # อย่าใช้ get_queue_count()
-            # เพราะ Queue ของ LP อาจเป็น 11-15
+            # Count real queue numbers for this category.
             #
-            # MAX(queue_no) = 15
-            # แต่จริง ๆ มีแค่ 5 queues
+            # Do not use MAX(queue_no), because League Prize
+            # may contain Queue 11-15 but that is only 5 queues.
             queue_rows = get_all_queue(
                 guild_id,
-                category,
+                category_name,
             )
 
             queue_numbers = {row["queue_no"] for row in queue_rows}
@@ -222,11 +251,11 @@ class Queue(commands.Cog):
 
                 stock = int(row["stock"])
 
-                # ใช้จำนวน position จริง
-                # ที่อยู่ใน queue_plan
+                # Number of actual positions assigned
+                # to queues for this category/reward.
                 assigned = get_assigned_count(
                     guild_id,
-                    category,
+                    category_name,
                     reward,
                 )
 
@@ -239,12 +268,10 @@ class Queue(commands.Cog):
                     positions = "None"
 
                 else:
-                    # ของที่ถูก assign จะใช้
-                    # จากหน้าแรกไปเรื่อย ๆ
                     start_index = assigned
 
-                    # Feather A ต่อจาก Feather S
-                    # ใน Filter เดียวกัน
+                    # Feather A continues after all Feather S
+                    # in the same filter.
                     if reward == "FEATHER_A":
                         feather_s = rewards.get("FEATHER_S")
 
@@ -267,7 +294,7 @@ class Queue(commands.Cog):
                 )
 
             embed.add_field(
-                name=f"📂 {category}",
+                name=f"📂 {category_name}",
                 value="\n\n".join(category_lines),
                 inline=False,
             )
@@ -284,7 +311,10 @@ class Queue(commands.Cog):
     )
     @discord.app_commands.choices(
         category=[
-            discord.app_commands.Choice(name=cat, value=cat)
+            discord.app_commands.Choice(
+                name=cat,
+                value=cat,
+            )
             for cat in (*CATEGORIES, "All")
         ]
     )
@@ -292,7 +322,7 @@ class Queue(commands.Cog):
         number="Optional queue number",
         category="Optional category (All by default)",
     )
-    async def queue(
+    async def queuelist(
         self,
         interaction: discord.Interaction,
         number: int | None = None,
@@ -307,57 +337,57 @@ class Queue(commands.Cog):
 
         guild_id = str(interaction.guild.id)
 
-        # -----------------------------------------
+        # =====================================================
         # Category selection
-        # -----------------------------------------
+        # =====================================================
 
         selected_categories = self.get_selected_categories(category)
 
-        # -----------------------------------------
-        # Load Queue Data
-        # -----------------------------------------
+        # =====================================================
+        # Load data
+        # =====================================================
 
         if number is not None:
-            # No category filter
+            # All categories
             if selected_categories is None:
                 data = get_queue(
                     guild_id,
                     number,
                 )
 
-            # Category filter
+            # Filtered categories
             else:
                 data = []
 
-                for cat in selected_categories:
+                for category_name in selected_categories:
                     rows = get_queue(
                         guild_id,
                         number,
-                        cat,
+                        category_name,
                     )
 
                     data.extend(rows)
 
         else:
-            # No category filter
+            # All categories
             if selected_categories is None:
                 data = get_all_queue(guild_id)
 
-            # Category filter
+            # Filtered categories
             else:
                 data = []
 
-                for cat in selected_categories:
+                for category_name in selected_categories:
                     rows = get_all_queue(
                         guild_id,
-                        cat,
+                        category_name,
                     )
 
                     data.extend(rows)
 
-        # -----------------------------------------
+        # =====================================================
         # Nothing found
-        # -----------------------------------------
+        # =====================================================
 
         if not data:
             category_name = category.value if category is not None else None
@@ -368,7 +398,7 @@ class Queue(commands.Cog):
             elif number is not None:
                 message = f"❌ Queue #{number} not found"
 
-            elif category_name is not None:
+            elif category_name is not None and category_name != "All":
                 message = f"❌ No queues found for **{category_name}**"
 
             else:
@@ -378,111 +408,293 @@ class Queue(commands.Cog):
 
             return
 
-        # -----------------------------------------
-        # Group
+        # =====================================================
+        # Group queue data
         #
-        # queue_no
-        #   └ category
-        #       └ reward
-        # -----------------------------------------
+        # GL + LP:
+        #
+        # ("LINKED", queue_no)
+        #
+        # Independent:
+        #
+        # ("Emperium Overrun", queue_no)
+        # ("Designed Auction", queue_no)
+        # =====================================================
 
         queues = {}
 
         for row in data:
             queue_no = row["queue_no"]
+
             row_category = row["category"]
+
             reward_type = row["reward_type"]
 
             # GL + LP share queue numbering
             if row_category in LINKED:
-                group_key = ("LINKED", queue_no)
+                group_key = (
+                    "LINKED",
+                    queue_no,
+                )
 
-            # Emperium / Designed have their own numbering
+            # Independent categories
             else:
-                group_key = (row_category, queue_no)
+                group_key = (
+                    row_category,
+                    queue_no,
+                )
 
             (
-                queues.setdefault(group_key, {})
-                .setdefault(row_category, {})
-                .setdefault(reward_type, [])
+                queues.setdefault(
+                    group_key,
+                    {},
+                )
+                .setdefault(
+                    row_category,
+                    {},
+                )
+                .setdefault(
+                    reward_type,
+                    [],
+                )
                 .append(row)
             )
 
-        # -----------------------------------------
-        # Build output
-        # -----------------------------------------
+        # =====================================================
+        # Build embeds
+        # =====================================================
 
-        sections = []
+        embeds = []
 
-        for group_key in sorted(queues, key=lambda x: (x[0], x[1])):
-            group_name, queue_no = group_key
+        # Discord limits:
+        # - max 25 fields per embed
+        # - max ~6000 chars total per embed
+        MAX_FIELDS = 20
+        MAX_EMBED_CHARS = 5500
+        MAX_FIELD_VALUE = 1024
 
-            category_groups = queues[group_key]
+        def create_embed(
+            title,
+            continued=False,
+        ):
+            if continued:
+                title = f"{title} • Continued"
 
-            if group_name == "LINKED":
-                lines = [f"📋 Queue #{queue_no}", "🏆 Guild League / League Prize"]
+            return discord.Embed(
+                title=title,
+                description="Auction Queue List",
+            )
 
-            else:
-                lines = [f"📋 {group_name} — Queue #{queue_no}"]
-            # Keep normal category order
-            for cat in CATEGORIES:
-                reward_groups = category_groups.get(cat)
+        def embed_size(embed):
+            size = len(embed.title or "") + len(embed.description or "")
+
+            for field in embed.fields:
+                size += len(field.name)
+
+                size += len(field.value)
+
+            return size
+
+        def split_value(
+            value,
+            max_length=MAX_FIELD_VALUE,
+        ):
+            """
+            Split a field value safely without
+            breaking Discord's 1024 char field limit.
+            """
+
+            if len(value) <= max_length:
+                return [value]
+
+            parts = []
+            current = ""
+
+            for line in value.splitlines():
+                candidate = f"{current}\n{line}" if current else line
+
+                if len(candidate) > max_length:
+                    if current:
+                        parts.append(current)
+
+                    current = line
+
+                else:
+                    current = candidate
+
+            if current:
+                parts.append(current)
+
+            return parts
+
+        def add_queue_to_embeds(
+            embed_list,
+            current_embed,
+            embed_title,
+            queue_no,
+            value,
+        ):
+            """
+            Add Queue field safely.
+
+            Starts another embed when:
+            - field count is getting too high
+            - embed is getting too large
+            """
+            separator = "────────────────────"
+
+            queue_value = (
+                f"{value}\n\n{separator}"
+                if value
+                else separator
+            )
+            
+            values = split_value(
+                queue_value
+            )
+
+            for index, field_value in enumerate(values):
+                if index == 0:
+                    field_name = f"📋 Queue #{queue_no}"
+
+                else:
+                    field_name = f"↳ Queue #{queue_no} (continued)"
+
+                estimated_size = (
+                    embed_size(current_embed) + len(field_name) + len(field_value)
+                )
+
+                if (
+                    len(current_embed.fields) >= MAX_FIELDS
+                    or estimated_size >= MAX_EMBED_CHARS
+                ):
+                    if current_embed.fields:
+                        embed_list.append(current_embed)
+
+                    current_embed = create_embed(
+                        embed_title,
+                        continued=True,
+                    )
+
+                current_embed.add_field(
+                    name=field_name,
+                    value=field_value,
+                    inline=False,
+                )
+
+            return current_embed
+
+        # =====================================================
+        # Guild League + League Prize
+        # =====================================================
+
+        linked_keys = [key for key in queues if key[0] == "LINKED"]
+
+        if linked_keys:
+            embed_title = "🏆 Guild League / League Prize"
+
+            embed = create_embed(embed_title)
+
+            for _, queue_no in sorted(
+                linked_keys,
+                key=lambda x: x[1],
+            ):
+                category_groups = queues[("LINKED", queue_no)]
+
+                value_lines = []
+
+                for linked_category in LINKED:
+                    reward_groups = category_groups.get(linked_category)
+
+                    if not reward_groups:
+                        continue
+
+                    # Show category inside linked queue
+                    # because an Extra Queue may contain
+                    # items from both GL and LP.
+                    value_lines.append(f"**{linked_category}**")
+
+                    queue_value = self.build_queue_value(reward_groups)
+
+                    if queue_value:
+                        value_lines.append(queue_value)
+
+                    value_lines.append("")
+
+                value = "\n".join(value_lines).strip()
+
+                embed = add_queue_to_embeds(
+                    embeds,
+                    embed,
+                    embed_title,
+                    queue_no,
+                    value,
+                )
+
+            if embed.fields:
+                embeds.append(embed)
+
+        # =====================================================
+        # Independent categories
+        # =====================================================
+
+        for independent_category in (
+            "Emperium Overrun",
+            "Designed Auction",
+        ):
+            category_keys = [key for key in queues if key[0] == independent_category]
+
+            if not category_keys:
+                continue
+
+            embed_title = f"📂 {independent_category}"
+
+            embed = create_embed(embed_title)
+
+            for _, queue_no in sorted(
+                category_keys,
+                key=lambda x: x[1],
+            ):
+                category_groups = queues[
+                    (
+                        independent_category,
+                        queue_no,
+                    )
+                ]
+
+                reward_groups = category_groups.get(independent_category)
 
                 if not reward_groups:
                     continue
 
-                lines.append(f"\n**{cat}**")
+                value = self.build_queue_value(reward_groups)
 
-                for reward in REWARD_ORDER:
-                    rows = reward_groups.get(reward)
+                embed = add_queue_to_embeds(
+                    embeds,
+                    embed,
+                    embed_title,
+                    queue_no,
+                    value,
+                )
 
-                    if not rows:
-                        continue
+            if embed.fields:
+                embeds.append(embed)
 
-                    lines.append(
-                        REWARD_NAMES.get(
-                            reward,
-                            reward,
-                        )
-                    )
-
-                    positions = self.group_slots(rows)
-
-                    lines.extend(f"- {position}" for position in positions.splitlines())
-
-            sections.append("\n".join(lines))
-
-        # -----------------------------------------
-        # Discord has message size limit.
-        # Split around 1900 chars.
-        # -----------------------------------------
-
-        chunks = []
-
-        current = ""
-
-        for section in sections:
-            candidate = (f"{current}\n\n{section}").strip()
-
-            if current and len(candidate) > 1900:
-                chunks.append(current)
-
-                current = section
-
-            else:
-                current = candidate
-
-        if current:
-            chunks.append(current)
-
-        # -----------------------------------------
+        # =====================================================
         # Send
-        # -----------------------------------------
+        # =====================================================
 
-        await interaction.response.send_message(chunks[0])
+        if not embeds:
+            await interaction.response.send_message("❌ No queue data found.")
 
-        for chunk in chunks[1:]:
-            await interaction.followup.send(chunk)
+            return
+
+        # First response
+        await interaction.response.send_message(embed=embeds[0])
+
+        # Additional embeds
+        for embed in embeds[1:]:
+            await interaction.followup.send(embed=embed)
 
 
 async def setup(bot):
