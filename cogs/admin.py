@@ -374,21 +374,50 @@ class Admin(commands.Cog):
             # =================================
             # Response
             # =================================
+            lines = ["✅ Queue Generated", ""]
 
-            lines = ["✅ Queue Generated", "", "Queues:"]
+            # -------------------------
+            # Guild League + League Prize
+            # -------------------------
 
-            for cat, data in results.items():
+            if any(cat in results for cat in LINKED):
+                lines.append("🏆 Guild League / League Prize")
+
+                for cat in LINKED:
+                    if cat not in results:
+                        continue
+
+                    data = results[cat]
+
+                    if data["count"] > 0:
+                        lines.append(
+                            f"- {cat}: "
+                            f"{data['count']} "
+                            f"(Queue {data['start']}-{data['end']})"
+                        )
+
+            # -------------------------
+            # Independent Categories
+            # -------------------------
+
+            for cat in (
+                "Emperium Overrun",
+                "Designed Auction",
+            ):
+                if cat not in results:
+                    continue
+
+                data = results[cat]
+
+                lines.append("")
+                lines.append(f"📂 {cat}")
+
                 if data["count"] > 0:
                     lines.append(
-                        f"- {cat}: "
-                        f"{data['count']} "
-                        f"(Queue "
-                        f"{data['start']}-"
-                        f"{data['end']})"
+                        f"- {data['count']} (Queue {data['start']}-{data['end']})"
                     )
-
                 else:
-                    lines.append(f"- {cat}: 0")
+                    lines.append("- 0")
 
             # Extra belongs only to GL + LP
             if extra_count > 0:
