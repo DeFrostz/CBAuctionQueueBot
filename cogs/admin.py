@@ -8,6 +8,7 @@ from database import (
     set_reward_stock,
     set_reward_limit,
     get_rewards,
+    clear_queue,
     CATEGORIES,
 )
 from generator import generate_queue
