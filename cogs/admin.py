@@ -67,8 +67,7 @@ class Admin(commands.Cog):
             return
 
         guild_id = str(interaction.guild.id)
-        category_value = category.value if category is not None else CATEGORIES[0]
-
+        category_value = category.value if category is not None else "All"
         targets = []
         if category_value == "All":
             targets = list(CATEGORIES)
