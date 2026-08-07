@@ -58,6 +58,17 @@ class Queue(commands.Cog):
 
         return "\n".join(result)
 
+    def group_positions_explicit(self, start_index, amount):
+        """
+        Return explicit Page/Slot entries for each item (no ranges).
+        """
+        lines = []
+        for index in range(start_index, start_index + amount):
+            page = index // 4 + 1
+            slot = index % 4 + 1
+            lines.append(f"Page {page} : Slot {slot}")
+        return "\n".join(lines) if lines else "None"
+
     @discord.app_commands.command(
         name="extra",
         description="View rewards that are not assigned to a queue"
@@ -104,7 +115,8 @@ class Queue(commands.Cog):
                         positions = "None"
                     else:
                         start_index = assigned
-                        positions = self.group_position_range(start_index, extra)
+                        # Use explicit positions (one line per item) so staff can see exact slot numbers
+                        positions = self.group_positions_explicit(start_index, extra)
 
                     value = (
                         f"Stock: {row['stock']}\n"
