@@ -274,38 +274,78 @@ class Admin(commands.Cog):
             "FEATHER_A"
         )
     
-        # Validate
+        valid_categories = []
+        skipped_categories = []
+
         for cat in to_generate:
-    
+
             rows = get_rewards(
                 guild_id,
                 cat
             )
-    
+
             reward_map = {
                 row["reward_type"]: row
                 for row in rows
             }
-    
+
+            # ต้องมี reward ครบ 3 ตัว
             if any(
                 reward not in reward_map
                 for reward in required
             ):
-                await interaction.response.send_message(
-                    f"❌ {cat} is missing reward configuration."
+                skipped_categories.append(
+                    (cat, "missing reward config")
                 )
-                return
-    
+                continue
+
+            # limit ต้อง > 0 ครบทุกตัว
             if any(
-                reward_map[reward][
-                    "limit_per_queue"
-                ] < 1
+                int(
+                    reward_map[reward]["limit_per_queue"]
+                ) < 1
                 for reward in required
             ):
-                await interaction.response.send_message(
-                    f"❌ {cat} has an invalid queue limit."
+                skipped_categories.append(
+                    (cat, "missing limit")
                 )
-                return
+                continue
+
+            # stock ต้อง > 0 ครบทุกตัว
+            if any(
+                int(
+                    reward_map[reward]["stock"]
+                ) < 1
+                for reward in required
+            ):
+                skipped_categories.append(
+                    (cat, "missing stock")
+                )
+                continue
+
+            valid_categories.append(cat)
+
+
+        if not valid_categories:
+
+            lines = [
+                "❌ No categories are ready to generate."
+            ]
+
+            if skipped_categories:
+                lines.append("")
+                lines.append("Skipped:")
+
+                for cat, reason in skipped_categories:
+                    lines.append(
+                        f"- {cat}: {reason}"
+                    )
+
+            await interaction.response.send_message(
+                "\n".join(lines)
+            )
+
+            return
     
         await interaction.response.defer(
             thinking=True
@@ -314,7 +354,7 @@ class Admin(commands.Cog):
         try:
     
             # Remove previous generated queues
-            for cat in to_generate:
+            for cat in valid_categories:
                 clear_queue(
                     guild_id,
                     cat
@@ -332,7 +372,7 @@ class Admin(commands.Cog):
             # Generate normal category queues
             # =================================
     
-            for cat in to_generate:
+            for cat in valid_categories:
     
                 rows = get_rewards(
                     guild_id,
@@ -440,7 +480,16 @@ class Admin(commands.Cog):
                     lines.append(
                         f"- {cat}: 0"
                     )
-    
+                    
+            if skipped_categories:
+                lines.append("")
+                lines.append("Skipped:")
+
+            for cat, reason in skipped_categories:
+                lines.append(
+                    f"- {cat}: {reason}"
+                )
+            
             if extra_count > 0:
     
                 lines.append(
