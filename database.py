@@ -191,9 +191,9 @@ def get_rewards(guild_id, category=CATEGORIES[0]):
 def clear_queue(guild_id, category=None):
     conn = get_connection()
     if category is None:
-        conn.execute("DELETE FROM queue_plan WHERE guild_id=?", (guild_id,))
+        conn.execute("DELETE FROM queue_plan WHERE guild_id= ?", (guild_id,))
     else:
-        conn.execute("DELETE FROM queue_plan WHERE guild_id=? AND category=?", (guild_id, category))
+        conn.execute("DELETE FROM queue_plan WHERE guild_id= ? AND category= ?", (guild_id, category))
     conn.commit()
     conn.close()
 
@@ -208,6 +208,22 @@ def save_queue_position(guild_id, queue_no, reward_type, page, slot, category=CA
         page,
         slot
     ))
+    conn.commit()
+    conn.close()
+
+
+def save_queue_positions_bulk(positions):
+    """
+    positions: iterable of tuples (guild_id, category, queue_no, reward_type, page, slot)
+    Inserts many rows in one transaction for better performance.
+    """
+    if not positions:
+        return
+    conn = get_connection()
+    conn.executemany(
+        "INSERT INTO queue_plan (guild_id, category, queue_no, reward_type, page, slot) VALUES (?,?,?,?,?,?)",
+        positions
+    )
     conn.commit()
     conn.close()
 
