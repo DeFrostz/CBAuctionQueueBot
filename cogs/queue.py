@@ -7,7 +7,7 @@ from database import (
     get_queue,
     get_queue_count,
     get_rewards
-)
+) 
 
 
 class Queue(commands.Cog):
@@ -211,15 +211,17 @@ class Queue(commands.Cog):
         }
         reward_order = ("CARD", "FEATHER_S", "FEATHER_A")
 
+        # Group by (queue_no, category) so queues from different categories don't collide
         queues = {}
         for row in data:
-            queues.setdefault(row["queue_no"], {}).setdefault(
+            key = (row["queue_no"], row["category"]) if row["category"] is not None else (row["queue_no"], "")
+            queues.setdefault(key, {}).setdefault(
                 row["reward_type"], []
             ).append(row)
 
         sections = []
-        for queue_no, reward_groups in queues.items():
-            lines = [f"📋 Queue #{queue_no}"]
+        for (queue_no, category), reward_groups in sorted(queues.items()):
+            lines = [f"📋 Queue #{queue_no} — {category}"]
             for reward in reward_order:
                 rows = reward_groups.get(reward)
                 if not rows:
