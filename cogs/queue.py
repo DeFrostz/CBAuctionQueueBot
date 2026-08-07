@@ -259,29 +259,73 @@ class Queue(commands.Cog):
                 "⏳ Time-Space"
         }
         reward_order = ("CARD", "FEATHER_S", "FEATHER_A")
-
-        # Group by (queue_no, category) so queues from different categories don't collide
+        # Group by queue_no first.
+        # One Extra queue can contain positions
+        # from both Guild League and League Prize.
         queues = {}
+
         for row in data:
-            key = (row["queue_no"], row["category"]) if row["category"] is not None else (row["queue_no"], "")
-            queues.setdefault(key, {}).setdefault(
-                row["reward_type"], []
-            ).append(row)
+
+            queue_no = row["queue_no"]
+            category = row["category"]
+
+            queues \
+                .setdefault(queue_no, {}) \
+                .setdefault(category, {}) \
+                .setdefault(
+                    row["reward_type"],
+                    []
+                ) \
+                .append(row)
 
         sections = []
-        for (queue_no, category), reward_groups in sorted(queues.items()):
-            lines = [f"📋 Queue #{queue_no} — {category}"]
-            for reward in reward_order:
-                rows = reward_groups.get(reward)
-                if not rows:
-                    continue
-                lines.append(name_map.get(reward, reward))
-                lines.extend(
-                    f"- {position}"
-                    for position in self.group_slots(rows).splitlines()
-                )
-            sections.append("\n".join(lines))
 
+        for queue_no in sorted(queues):
+
+            category_groups = queues[
+                queue_no
+            ]
+
+            lines = [
+                f"📋 Queue #{queue_no}"
+            ]
+
+            for category, reward_groups in (
+                category_groups.items()
+            ):
+
+                lines.append(
+                    f"\n**{category}**"
+                )
+
+                for reward in reward_order:
+
+                    rows = reward_groups.get(
+                        reward
+                    )
+
+                    if not rows:
+                        continue
+
+                    lines.append(
+                        name_map.get(
+                            reward,
+                            reward
+                        )
+                    )
+
+                    lines.extend(
+                        f"- {position}"
+                        for position
+                        in self.group_slots(
+                            rows
+                        ).splitlines()
+                    )
+
+            sections.append(
+                "\n".join(lines)
+            )
+            
         chunks = []
         current = ""
         for section in sections:

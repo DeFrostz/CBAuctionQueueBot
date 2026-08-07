@@ -11,8 +11,12 @@ from database import (
     clear_queue,
     CATEGORIES,
 )
-from generator import generate_queue
 
+from generator import (
+    generate_queue,
+    build_extra_pool,
+    generate_extra_queues
+)
 
 LINKED = ("Guild League", "League Prize")
 
@@ -355,14 +359,17 @@ class Admin(commands.Cog):
     # -----------------------------
     # /generate
     # -----------------------------
-
     @discord.app_commands.command(
         name="generate",
         description="Generate auction queue"
     )
     @discord.app_commands.choices(
         category=[
-            discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")
+            discord.app_commands.Choice(
+                name=cat,
+                value=cat
+            )
+            for cat in (*CATEGORIES, "All")
         ]
     )
     async def generate(
@@ -375,53 +382,241 @@ class Admin(commands.Cog):
                 "❌ This command can only be used in a server"
             )
             return
-
+    
         guild_id = str(interaction.guild.id)
-        category_value = (category.value if category is not None else CATEGORIES[0])
-
-        # Determine which categories we will generate (for validation)
+    
+        category_value = (
+            category.value
+            if category is not None
+            else CATEGORIES[0]
+        )
+    
         if category_value == "All":
             to_generate = list(CATEGORIES)
+    
         elif category_value in LINKED:
+            # GL + LP always generate together
             to_generate = list(LINKED)
+    
         else:
             to_generate = [category_value]
-
-        # Validate each category has limits/configured
+    
+        required = (
+            "CARD",
+            "FEATHER_S",
+            "FEATHER_A"
+        )
+    
+        # Validate
         for cat in to_generate:
-            rows = get_rewards(guild_id, cat)
-            reward_map = {row["reward_type"]: row for row in rows}
-            required = ("CARD", "FEATHER_S", "FEATHER_A")
-            if any(r not in reward_map for r in required) or any(reward_map[r]["limit_per_queue"] < 1 for r in required):
+    
+            rows = get_rewards(
+                guild_id,
+                cat
+            )
+    
+            reward_map = {
+                row["reward_type"]: row
+                for row in rows
+            }
+    
+            if any(
+                reward not in reward_map
+                for reward in required
+            ):
                 await interaction.response.send_message(
-                    "❌ Please set stock and a limit of 1 or more for all rewards first\n\nUse:\n/setstock <reward> <stock> <category>\n/setlimit <reward> <limit> <category>"
+                    f"❌ {cat} is missing reward configuration."
                 )
                 return
-
-        # Acknowledge interaction to avoid Discord timeout and run generation in background
-        await interaction.response.defer(thinking=True)
-
-        # Run generator per category in a thread to avoid blocking the event loop
-        results = {}
+    
+            if any(
+                reward_map[reward][
+                    "limit_per_queue"
+                ] < 1
+                for reward in required
+            ):
+                await interaction.response.send_message(
+                    f"❌ {cat} has an invalid queue limit."
+                )
+                return
+    
+        await interaction.response.defer(
+            thinking=True
+        )
+    
         try:
+    
+            # Remove previous generated queues
             for cat in to_generate:
-                rows = get_rewards(guild_id, cat)
-                cnt = await asyncio.to_thread(generate_queue, guild_id, rows)
-                results[cat] = cnt
+                clear_queue(
+                    guild_id,
+                    cat
+                )
+    
+            results = {}
+    
+            next_queue_no = 1
+    
+            category_rewards = {}
+    
+            normal_queue_counts = {}
+    
+            # =================================
+            # Generate normal category queues
+            # =================================
+    
+            for cat in to_generate:
+    
+                rows = get_rewards(
+                    guild_id,
+                    cat
+                )
+    
+                category_rewards[cat] = rows
+    
+                count = await asyncio.to_thread(
+                    generate_queue,
+                    guild_id,
+                    rows,
+                    next_queue_no
+                )
+    
+                normal_queue_counts[cat] = count
+    
+                start = next_queue_no
+    
+                next_queue_no += count
+    
+                results[cat] = {
+                    "count": count,
+                    "start": start,
+                    "end": next_queue_no - 1
+                }
+    
+            extra_count = 0
+    
+            remaining_extra = None
+    
+            # =================================
+            # GL + LP Extra Pool
+            # =================================
+    
+            if all(
+                cat in category_rewards
+                for cat in LINKED
+            ):
+    
+                extra_pool = build_extra_pool(
+                    {
+                        cat: category_rewards[cat]
+                        for cat in LINKED
+                    },
+                    {
+                        cat: normal_queue_counts[cat]
+                        for cat in LINKED
+                    }
+                )
+    
+                # Limits are linked,
+                # so GL limits can be used.
+                linked_reward_map = {
+                    row["reward_type"]: row
+                    for row in category_rewards[
+                        LINKED[0]
+                    ]
+                }
+    
+                limits = {
+                    reward: linked_reward_map[
+                        reward
+                    ]["limit_per_queue"]
+                    for reward in required
+                }
+    
+                extra_count, remaining_extra = (
+                    await asyncio.to_thread(
+                        generate_extra_queues,
+                        guild_id,
+                        extra_pool,
+                        limits,
+                        next_queue_no
+                    )
+                )
+    
+                extra_start = next_queue_no
+    
+                next_queue_no += extra_count
+    
+            # =================================
+            # Response
+            # =================================
+    
+            lines = [
+                "✅ Queue Generated",
+                "",
+                "Total queues per category:"
+            ]
+    
+            for cat, data in results.items():
+    
+                if data["count"] > 0:
+    
+                    lines.append(
+                        f"- {cat}: "
+                        f"{data['count']} "
+                        f"(Queue "
+                        f"{data['start']}-"
+                        f"{data['end']})"
+                    )
+    
+                else:
+                    lines.append(
+                        f"- {cat}: 0"
+                    )
+    
+            if extra_count > 0:
+    
+                lines.append(
+                    f"- Extra: {extra_count} "
+                    f"(Queue "
+                    f"{extra_start}-"
+                    f"{next_queue_no - 1})"
+                )
+    
+            if remaining_extra is not None:
+    
+                lines.extend([
+                    "",
+                    "Remaining Extra:",
+                    f"- Card: "
+                    f"{remaining_extra['CARD']}",
+                    f"- Light-Dark: "
+                    f"{remaining_extra['FEATHER_S']}",
+                    f"- Time-Space: "
+                    f"{remaining_extra['FEATHER_A']}"
+                ])
+    
+            lines.extend([
+                "",
+                f"Total queues: {next_queue_no - 1}",
+                "",
+                "Use: /queuelist <number>"
+            ])
+    
+            await interaction.followup.send(
+                "\n".join(lines)
+            )
+    
         except Exception as e:
-            print("Error generating queues:", e)
-            await interaction.followup.send(f"❌ Failed to generate queue: {e}")
-            return
-
-        # Build reply text
-        lines = ["✅ Queue Generated", "", "Total queues per category:"]
-        for cat, cnt in results.items():
-            lines.append(f"- {cat}: {cnt}")
-
-        lines.append("")
-        lines.append("Use: /queue <number> to view queue")
-
-        await interaction.followup.send("\n".join(lines))
+    
+            print(
+                "Error generating queues:",
+                e
+            )
+    
+            await interaction.followup.send(
+                f"❌ Failed to generate queue: {e}"
+            )
 
 
 async def setup(bot):
