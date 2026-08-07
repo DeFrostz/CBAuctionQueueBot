@@ -53,7 +53,12 @@ def generate_queues(guild_id: str, category: str | None = "Guild League") -> dic
         queue_count = min(counts)
 
         # per-reward index for page/slot numbering (per category)
-        indices = {r: 0 for r in REWARD_ORDER}
+        # FEATHER_A slots should start after all FEATHER_S slots (S then A)
+        indices = {
+            "CARD": 0,
+            "FEATHER_S": 0,
+            "FEATHER_A": reward_map["FEATHER_S"]["stock"]  # a_index starts after total S stock
+        }
 
         for q in range(1, queue_count + 1):
             for r in REWARD_ORDER:
@@ -86,8 +91,18 @@ def generate_queues(guild_id: str, category: str | None = "Guild League") -> dic
         gl_full = min(gl_counts)
 
         # per-reward indices
-        gl_indices = {r: 0 for r in REWARD_ORDER}
-        lp_indices = {r: 0 for r in REWARD_ORDER}
+        gl_indices = {
+            "CARD": 0,
+            "FEATHER_S": 0,
+            # FEATHER_A starts after all FEATHER_S positions for GL
+            "FEATHER_A": gl_map["FEATHER_S"]["stock"]
+        }
+        lp_indices = {
+            "CARD": 0,
+            "FEATHER_S": 0,
+            # FEATHER_A starts after all FEATHER_S positions for LP
+            "FEATHER_A": lp_map["FEATHER_S"]["stock"]
+        }
 
         qno = 0
         for _ in range(gl_full):
