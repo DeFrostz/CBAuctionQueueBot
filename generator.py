@@ -19,13 +19,22 @@ def get_queue_count_from_rewards(rewards):
 
     reward_map = {row["reward_type"]: row for row in rewards}
 
-    if any(r not in reward_map for r in REWARD_TYPES):
+    if any(reward not in reward_map for reward in REWARD_TYPES):
         return 0
 
-    return min(
-        reward_map[reward]["stock"] // reward_map[reward]["limit_per_queue"]
-        for reward in REWARD_TYPES
-    )
+    counts = []
+
+    for reward in REWARD_TYPES:
+        stock = int(reward_map[reward]["stock"])
+
+        limit = int(reward_map[reward]["limit_per_queue"])
+
+        if limit <= 0:
+            return 0
+
+        counts.append(stock // limit)
+
+    return min(counts)
 
 
 def generate_queue(guild_id, rewards, start_no=1):

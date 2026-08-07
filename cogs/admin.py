@@ -218,7 +218,7 @@ class Admin(commands.Cog):
 
         guild_id = str(interaction.guild.id)
 
-        category_value = category.value if category is not None else CATEGORIES[0]
+        category_value = category.value if category is not None else "All"
 
         if category_value == "All":
             to_generate = list(CATEGORIES)
@@ -276,20 +276,23 @@ class Admin(commands.Cog):
         await interaction.response.defer(thinking=True)
 
         try:
-            # Remove previous generated queues
+            # =================================
+            # Clear only categories being generated
+            # =================================
+
             for cat in valid_categories:
                 clear_queue(guild_id, cat)
 
             results = {}
 
-            next_queue_no = 1
-
             category_rewards = {}
-
             normal_queue_counts = {}
 
+            # GL + LP share this counter only
+            linked_next_queue_no = 1
+
             # =================================
-            # Generate normal category queues
+            # Generate normal queues
             # =================================
 
             for cat in valid_categories:
@@ -297,29 +300,47 @@ class Admin(commands.Cog):
 
                 category_rewards[cat] = rows
 
-                count = await asyncio.to_thread(
-                    generate_queue, guild_id, rows, next_queue_no
-                )
+                # -----------------------------
+                # Guild League + League Prize
+                # share queue numbering
+                # -----------------------------
+
+                if cat in LINKED:
+                    start_no = linked_next_queue_no
+
+                    count = await asyncio.to_thread(
+                        generate_queue, guild_id, rows, start_no
+                    )
+
+                    linked_next_queue_no += count
+
+                # -----------------------------
+                # Independent categories
+                # always start from Queue 1
+                # -----------------------------
+
+                else:
+                    start_no = 1
+
+                    count = await asyncio.to_thread(
+                        generate_queue, guild_id, rows, start_no
+                    )
 
                 normal_queue_counts[cat] = count
 
-                start = next_queue_no
-
-                next_queue_no += count
-
                 results[cat] = {
                     "count": count,
-                    "start": start,
-                    "end": next_queue_no - 1,
+                    "start": start_no,
+                    "end": (start_no + count - 1 if count > 0 else 0),
                 }
-
-            extra_count = 0
-
-            remaining_extra = None
 
             # =================================
             # GL + LP Extra Pool
             # =================================
+
+            extra_count = 0
+            remaining_extra = None
+            extra_start = None
 
             if all(cat in category_rewards for cat in LINKED):
                 extra_pool = build_extra_pool(
@@ -327,8 +348,8 @@ class Admin(commands.Cog):
                     {cat: normal_queue_counts[cat] for cat in LINKED},
                 )
 
-                # Limits are linked,
-                # so GL limits can be used.
+                # GL + LP limits are linked,
+                # so use GL limits
                 linked_reward_map = {
                     row["reward_type"]: row for row in category_rewards[LINKED[0]]
                 }
@@ -338,19 +359,23 @@ class Admin(commands.Cog):
                     for reward in required
                 }
 
+                extra_start = linked_next_queue_no
+
                 extra_count, remaining_extra = await asyncio.to_thread(
-                    generate_extra_queues, guild_id, extra_pool, limits, next_queue_no
+                    generate_extra_queues,
+                    guild_id,
+                    extra_pool,
+                    limits,
+                    linked_next_queue_no,
                 )
 
-                extra_start = next_queue_no
-
-                next_queue_no += extra_count
+                linked_next_queue_no += extra_count
 
             # =================================
             # Response
             # =================================
 
-            lines = ["✅ Queue Generated", "", "Total queues per category:"]
+            lines = ["✅ Queue Generated", "", "Queues:"]
 
             for cat, data in results.items():
                 if data["count"] > 0:
@@ -365,35 +390,50 @@ class Admin(commands.Cog):
                 else:
                     lines.append(f"- {cat}: 0")
 
+            # Extra belongs only to GL + LP
+            if extra_count > 0:
+                lines.append(
+                    f"- GL/LP Extra: "
+                    f"{extra_count} "
+                    f"(Queue "
+                    f"{extra_start}-"
+                    f"{linked_next_queue_no - 1})"
+                )
+
+            # Skipped categories
             if skipped_categories:
                 lines.append("")
                 lines.append("Skipped:")
 
-            for cat, reason in skipped_categories:
-                lines.append(f"- {cat}: {reason}")
+                for cat, reason in skipped_categories:
+                    lines.append(f"- {cat}: {reason}")
 
-            if extra_count > 0:
-                lines.append(
-                    f"- Extra: {extra_count} (Queue {extra_start}-{next_queue_no - 1})"
-                )
-
+            # Remaining linked extra
             if remaining_extra is not None:
                 lines.extend(
                     [
                         "",
-                        "Remaining Extra:",
+                        "Remaining GL/LP Extra:",
                         f"- Card: {remaining_extra['CARD']}",
                         f"- Light-Dark: {remaining_extra['FEATHER_S']}",
                         f"- Time-Space: {remaining_extra['FEATHER_A']}",
                     ]
                 )
 
+            total_generated = (
+                sum(data["count"] for data in results.values()) + extra_count
+            )
+
             lines.extend(
-                ["", f"Total queues: {next_queue_no - 1}", "", "Use: /queuelist"]
+                [
+                    "",
+                    f"Total generated queues: {total_generated}",
+                    "",
+                    "Use: /queuelist",
+                ]
             )
 
             await interaction.followup.send("\n".join(lines))
-
         except Exception as e:
             print("Error generating queues:", e)
 

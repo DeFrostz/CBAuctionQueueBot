@@ -284,10 +284,7 @@ class Queue(commands.Cog):
     )
     @discord.app_commands.choices(
         category=[
-            discord.app_commands.Choice(
-                name=cat,
-                value=cat
-            )
+            discord.app_commands.Choice(name=cat, value=cat)
             for cat in (*CATEGORIES, "All")
         ]
     )
@@ -393,24 +390,21 @@ class Queue(commands.Cog):
 
         for row in data:
             queue_no = row["queue_no"]
-
             row_category = row["category"]
-
             reward_type = row["reward_type"]
 
+            # GL + LP share queue numbering
+            if row_category in LINKED:
+                group_key = ("LINKED", queue_no)
+
+            # Emperium / Designed have their own numbering
+            else:
+                group_key = (row_category, queue_no)
+
             (
-                queues.setdefault(
-                    queue_no,
-                    {},
-                )
-                .setdefault(
-                    row_category,
-                    {},
-                )
-                .setdefault(
-                    reward_type,
-                    [],
-                )
+                queues.setdefault(group_key, {})
+                .setdefault(row_category, {})
+                .setdefault(reward_type, [])
                 .append(row)
             )
 
@@ -420,11 +414,16 @@ class Queue(commands.Cog):
 
         sections = []
 
-        for queue_no in sorted(queues):
-            category_groups = queues[queue_no]
+        for group_key in sorted(queues, key=lambda x: (x[0], x[1])):
+            group_name, queue_no = group_key
 
-            lines = [f"📋 Queue #{queue_no}"]
+            category_groups = queues[group_key]
 
+            if group_name == "LINKED":
+                lines = [f"📋 Queue #{queue_no}", "🏆 Guild League / League Prize"]
+
+            else:
+                lines = [f"📋 {group_name} — Queue #{queue_no}"]
             # Keep normal category order
             for cat in CATEGORIES:
                 reward_groups = category_groups.get(cat)
