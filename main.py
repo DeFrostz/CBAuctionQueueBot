@@ -15,7 +15,9 @@ bot = commands.Bot(
 
 commands_synced = False
 
+# Support either a single SYNC_GUILD_ID or multiple as comma-separated SYNC_GUILD_IDS
 SYNC_GUILD_ID = os.environ.get("SYNC_GUILD_ID")
+SYNC_GUILD_IDS = os.environ.get("SYNC_GUILD_IDS")
 
 
 async def sync_guild_commands(guild):
@@ -41,6 +43,13 @@ async def sync_to_guild_id(guild_id_str: str):
         print(f"Failed to sync commands to guild id {gid}: {e}")
 
 
+async def sync_to_guild_ids(guild_ids_str: str):
+    """Accepts a comma-separated list of guild IDs and attempts to sync each."""
+    ids = [s.strip() for s in guild_ids_str.split(",") if s.strip()]
+    for gid_str in ids:
+        await sync_to_guild_id(gid_str)
+
+
 @bot.event
 async def on_ready():
     global commands_synced
@@ -54,7 +63,12 @@ async def on_ready():
     if commands_synced:
         return
 
-    # If a specific SYNC_GUILD_ID is set, force a sync to that guild for immediate testing
+    # If a specific SYNC_GUILD_ID or SYNC_GUILD_IDS is set, force a sync to that guild(s) for immediate testing
+    if SYNC_GUILD_IDS:
+        await sync_to_guild_ids(SYNC_GUILD_IDS)
+        commands_synced = True
+        return
+
     if SYNC_GUILD_ID:
         await sync_to_guild_id(SYNC_GUILD_ID)
         commands_synced = True
