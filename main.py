@@ -8,10 +8,7 @@ from database import init_database
 
 intents = discord.Intents.default()
 
-bot = commands.Bot(
-    command_prefix="!",
-    intents=intents
-)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 commands_synced = False
 
@@ -23,7 +20,9 @@ SYNC_GUILD_IDS = os.environ.get("SYNC_GUILD_IDS")
 async def sync_guild_commands(guild):
     bot.tree.copy_global_to(guild=guild)
     synced = await bot.tree.sync(guild=guild)
-    print(f"Synced {len(synced)} commands to {getattr(guild, 'name', guild)} ({getattr(guild, 'id', guild)})")
+    print(
+        f"Synced {len(synced)} commands to {getattr(guild, 'name', guild)} ({getattr(guild, 'id', guild)})"
+    )
 
 
 async def sync_to_guild_id(guild_id_str: str):
@@ -63,6 +62,10 @@ async def on_ready():
     if commands_synced:
         return
 
+    # ⭐ Sync global commands
+    global_synced = await bot.tree.sync()
+    print(f"Synced {len(global_synced)} global commands")
+
     # If a specific SYNC_GUILD_ID or SYNC_GUILD_IDS is set, force a sync to that guild(s) for immediate testing
     if SYNC_GUILD_IDS:
         await sync_to_guild_ids(SYNC_GUILD_IDS)
@@ -95,11 +98,9 @@ async def load_extensions():
 
 
 async def main():
-
     init_database()
 
     async with bot:
-
         await load_extensions()
 
         await bot.start(TOKEN)

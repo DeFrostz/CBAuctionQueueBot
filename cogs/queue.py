@@ -2,24 +2,14 @@ import discord
 
 from discord.ext import commands
 
-from database import (
-    get_all_queue,
-    get_queue,
-    get_queue_count,
-    get_rewards,
-    CATEGORIES
-)
+from database import get_all_queue, get_queue, get_queue_count, get_rewards, CATEGORIES
 
 
 class Queue(commands.Cog):
-
     def __init__(self, bot):
         self.bot = bot
 
-
-
     def group_slots(self, rows):
-
         """
         รวม Slot ที่อยู่ Page เดียวกัน
 
@@ -38,42 +28,26 @@ class Queue(commands.Cog):
         pages = {}
 
         for row in rows:
-
             page = row["page"]
             slot = row["slot"]
 
             if page not in pages:
                 pages[page] = []
 
-
             pages[page].append(slot)
-
-
 
         result = []
 
-
         for page, slots in pages.items():
-
             slots.sort()
 
-
             if len(slots) == 1:
-
                 slot_text = str(slots[0])
 
-
             else:
+                slot_text = f"{slots[0]}-{slots[-1]}"
 
-                slot_text = (
-                    f"{slots[0]}-{slots[-1]}"
-                )
-
-
-            result.append(
-                f"Page {page} : Slot {slot_text}"
-            )
-
+            result.append(f"Page {page} : Slot {slot_text}")
 
         return "\n".join(result)
 
@@ -97,13 +71,9 @@ class Queue(commands.Cog):
         return "\n".join(result)
 
     @discord.app_commands.command(
-        name="extra",
-        description="View rewards that are not assigned to a queue"
+        name="extra", description="View rewards that are not assigned to a queue"
     )
-    async def extra(
-        self,
-        interaction: discord.Interaction
-    ):
+    async def extra(self, interaction: discord.Interaction):
         if interaction.guild is None:
             await interaction.response.send_message(
                 "❌ This command can only be used in a server"
@@ -112,90 +82,53 @@ class Queue(commands.Cog):
 
         guild_id = str(interaction.guild.id)
 
-        reward_order = (
-            "CARD",
-            "FEATHER_S",
-            "FEATHER_A"
-        )
+        reward_order = ("CARD", "FEATHER_S", "FEATHER_A")
 
         reward_names = {
             "CARD": "🃏 Card",
             "FEATHER_S": "🌗 Light-Dark",
-            "FEATHER_A": "⏳ Time-Space"
+            "FEATHER_A": "⏳ Time-Space",
         }
 
         embed = discord.Embed(
-            title="📦 Extra Rewards",
-            description="Rewards not assigned to queues"
+            title="📦 Extra Rewards", description="Rewards not assigned to queues"
         )
 
         for category in CATEGORIES:
-
             rewards = {
-                row["reward_type"]: row
-                for row in get_rewards(
-                    guild_id,
-                    category
-                )
+                row["reward_type"]: row for row in get_rewards(guild_id, category)
             }
 
-            queue_count = get_queue_count(
-                guild_id,
-                category
-            )
+            queue_count = get_queue_count(guild_id, category)
 
-            category_lines = [
-                f"**Queues: {queue_count}**"
-            ]
+            category_lines = [f"**Queues: {queue_count}**"]
 
             for reward in reward_order:
-
                 row = rewards.get(reward)
 
                 if row is None:
-                    category_lines.append(
-                        f"{reward_names[reward]}\n"
-                        "Not configured"
-                    )
+                    category_lines.append(f"{reward_names[reward]}\nNot configured")
                     continue
 
-                assigned = (
-                    queue_count
-                    * row["limit_per_queue"]
-                )
+                assigned = queue_count * row["limit_per_queue"]
 
-                extra = max(
-                    row["stock"] - assigned,
-                    0
-                )
+                extra = max(row["stock"] - assigned, 0)
 
                 if extra == 0:
-
                     positions = "None"
 
                 else:
-
                     start_index = assigned
 
                     # Feather A starts after all Feather S
                     if reward == "FEATHER_A":
-
-                        feather_s = rewards.get(
-                            "FEATHER_S"
-                        )
+                        feather_s = rewards.get("FEATHER_S")
 
                         start_index = (
-                            feather_s["stock"]
-                            if feather_s
-                            else 0
+                            feather_s["stock"] if feather_s else 0
                         ) + assigned
 
-                    positions = (
-                        self.group_position_range(
-                            start_index,
-                            extra
-                        )
-                    )
+                    positions = self.group_position_range(start_index, extra)
 
                 category_lines.append(
                     f"{reward_names[reward]}\n"
@@ -206,26 +139,27 @@ class Queue(commands.Cog):
                 )
 
             embed.add_field(
-                name=f"📂 {category}",
-                value="\n\n".join(category_lines),
-                inline=False
+                name=f"📂 {category}", value="\n\n".join(category_lines), inline=False
             )
 
-        await interaction.response.send_message(
-            embed=embed
-        )
+        await interaction.response.send_message(embed=embed)
 
     @discord.app_commands.command(
-        name="queuelist",
-        description="View all queues or one specific queue"
+        name="queuelist", description="View queues by number and/or category"
+    )
+    @discord.app_commands.choices(
+        category=[
+            discord.app_commands.Choice(name=cat, value=cat) for cat in CATEGORIES
+        ]
     )
     @discord.app_commands.describe(
-        number="Optional queue number to view only that queue"
+        number="Optional queue number", category="Optional category"
     )
     async def queue(
         self,
         interaction: discord.Interaction,
-        number: int | None = None
+        number: int | None = None,
+        category: discord.app_commands.Choice[str] | None = None,
     ):
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -234,29 +168,36 @@ class Queue(commands.Cog):
             return
 
         guild_id = str(interaction.guild.id)
-        data = (
-            get_queue(guild_id, number)
-            if number is not None
-            else get_all_queue(guild_id)
-        )
+
+        category_value = category.value if category is not None else None
+
+        if number is not None:
+            data = get_queue(guild_id, number, category_value)
+
+        else:
+            data = get_all_queue(guild_id, category_value)
 
         if not data:
-            await interaction.response.send_message(
-                (
-                    f"❌ Queue #{number} not found"
-                    if number is not None
-                    else "❌ No queues generated yet. Use `/generate` first."
-                )
-            )
+            if number is not None and category_value is not None:
+                message = f"❌ Queue #{number} not found in **{category_value}**"
+
+            elif number is not None:
+                message = f"❌ Queue #{number} not found"
+
+            elif category_value is not None:
+                message = f"❌ No queues found for **{category_value}**"
+
+            else:
+                message = "❌ No queues generated yet. Use `/generate` first."
+
+            await interaction.response.send_message(message)
+
             return
 
         name_map = {
-            "CARD":
-                "🃏 Card",
-            "FEATHER_S":
-                "🌗 Light-Dark",
-            "FEATHER_A":
-                "⏳ Time-Space"
+            "CARD": "🃏 Card",
+            "FEATHER_S": "🌗 Light-Dark",
+            "FEATHER_A": "⏳ Time-Space",
         }
         reward_order = ("CARD", "FEATHER_S", "FEATHER_A")
         # Group by queue_no first.
@@ -265,67 +206,38 @@ class Queue(commands.Cog):
         queues = {}
 
         for row in data:
-
             queue_no = row["queue_no"]
             category = row["category"]
 
-            queues \
-                .setdefault(queue_no, {}) \
-                .setdefault(category, {}) \
-                .setdefault(
-                    row["reward_type"],
-                    []
-                ) \
-                .append(row)
+            queues.setdefault(queue_no, {}).setdefault(category, {}).setdefault(
+                row["reward_type"], []
+            ).append(row)
 
         sections = []
 
         for queue_no in sorted(queues):
+            category_groups = queues[queue_no]
 
-            category_groups = queues[
-                queue_no
-            ]
+            lines = [f"📋 Queue #{queue_no}"]
 
-            lines = [
-                f"📋 Queue #{queue_no}"
-            ]
-
-            for category, reward_groups in (
-                category_groups.items()
-            ):
-
-                lines.append(
-                    f"\n**{category}**"
-                )
+            for category, reward_groups in category_groups.items():
+                lines.append(f"\n**{category}**")
 
                 for reward in reward_order:
-
-                    rows = reward_groups.get(
-                        reward
-                    )
+                    rows = reward_groups.get(reward)
 
                     if not rows:
                         continue
 
-                    lines.append(
-                        name_map.get(
-                            reward,
-                            reward
-                        )
-                    )
+                    lines.append(name_map.get(reward, reward))
 
                     lines.extend(
                         f"- {position}"
-                        for position
-                        in self.group_slots(
-                            rows
-                        ).splitlines()
+                        for position in self.group_slots(rows).splitlines()
                     )
 
-            sections.append(
-                "\n".join(lines)
-            )
-            
+            sections.append("\n".join(lines))
+
         chunks = []
         current = ""
         for section in sections:
@@ -343,11 +255,5 @@ class Queue(commands.Cog):
             await interaction.followup.send(chunk)
 
 
-
-
-
 async def setup(bot):
-
-    await bot.add_cog(
-        Queue(bot)
-    )
+    await bot.add_cog(Queue(bot))
