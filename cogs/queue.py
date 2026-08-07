@@ -7,6 +7,7 @@ from database import (
     get_queue,
     get_queue_count,
     get_rewards,
+    get_assigned_count,
     CATEGORIES,
 )
 
@@ -81,7 +82,7 @@ class Queue(commands.Cog):
 
         for cat in categories:
             rewards = {row["reward_type"]: row for row in get_rewards(guild_id, cat)}
-            queue_count = get_queue_count(guild_id)
+            # Use assigned count from DB per category+reward instead of global queue_count * limit
             reward_order = ("CARD", "FEATHER_S", "FEATHER_A")
             reward_names = {
                 "CARD": "🃏 Card",
@@ -89,25 +90,20 @@ class Queue(commands.Cog):
                 "FEATHER_A": "⏳ Time-Space"
             }
 
-            lines = [f"Category: {cat}", f"Rewards not assigned to the current {queue_count} queue(s)"]
+            lines = [f"Category: {cat}"]
 
             for reward in reward_order:
                 row = rewards.get(reward)
                 if row is None:
                     value = "Not configured"
                 else:
-                    assigned = queue_count * row["limit_per_queue"]
+                    # actual assigned slots for this guild/category/reward
+                    assigned = get_assigned_count(guild_id, cat, reward)
                     extra = max(row["stock"] - assigned, 0)
                     if extra == 0:
                         positions = "None"
                     else:
                         start_index = assigned
-                        if reward == "FEATHER_A":
-                            feather_s = rewards.get("FEATHER_S")
-                            start_index = (
-                                (feather_s["stock"] if feather_s else 0)
-                                + assigned
-                            )
                         positions = self.group_position_range(start_index, extra)
 
                     value = (
