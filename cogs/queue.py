@@ -188,27 +188,51 @@ class Queue(commands.Cog):
 
     @discord.app_commands.command(
         name="extra",
-        description=("View rewards that are not assigned to a queue"),
+        description="View rewards that are not assigned to a queue",
     )
+    @discord.app_commands.choices(
+        category=[
+            discord.app_commands.Choice(
+                name=cat,
+                value=cat,
+            )
+            for cat in (*CATEGORIES, "All")
+        ]
+    )
+    @discord.app_commands.describe(category="Optional category (All by default)")
     async def extra(
         self,
         interaction: discord.Interaction,
+        category: discord.app_commands.Choice[str] | None = None,
     ):
         if interaction.guild is None:
             await interaction.response.send_message(
                 "❌ This command can only be used in a server"
             )
-
             return
 
         guild_id = str(interaction.guild.id)
+
+        # -----------------------------------------
+        # Category selection
+        # -----------------------------------------
+
+        if category is None or category.value == "All":
+            selected_categories = list(CATEGORIES)
+
+        elif category.value in LINKED:
+            # GL + LP linked
+            selected_categories = list(LINKED)
+
+        else:
+            selected_categories = [category.value]
 
         embed = discord.Embed(
             title="📦 Extra Rewards",
             description="Rewards not assigned to queues",
         )
 
-        for category_name in CATEGORIES:
+        for category_name in selected_categories:
             reward_rows = get_rewards(
                 guild_id,
                 category_name,
@@ -223,13 +247,9 @@ class Queue(commands.Cog):
                     value="Not configured",
                     inline=False,
                 )
-
                 continue
 
-            # Count real queue numbers for this category.
-            #
-            # Do not use MAX(queue_no), because League Prize
-            # may contain Queue 11-15 but that is only 5 queues.
+            # Count real queue numbers for this category
             queue_rows = get_all_queue(
                 guild_id,
                 category_name,
@@ -246,13 +266,10 @@ class Queue(commands.Cog):
 
                 if row is None:
                     category_lines.append(f"{REWARD_NAMES[reward]}\nNot configured")
-
                     continue
 
                 stock = int(row["stock"])
 
-                # Number of actual positions assigned
-                # to queues for this category/reward.
                 assigned = get_assigned_count(
                     guild_id,
                     category_name,
@@ -270,8 +287,7 @@ class Queue(commands.Cog):
                 else:
                     start_index = assigned
 
-                    # Feather A continues after all Feather S
-                    # in the same filter.
+                    # Feather A continues after Feather S
                     if reward == "FEATHER_A":
                         feather_s = rewards.get("FEATHER_S")
 
@@ -404,7 +420,10 @@ class Queue(commands.Cog):
             else:
                 message = "❌ No queues generated yet. Use `/generate` first."
 
-            await interaction.response.send_message(message)
+            await interaction.response.send_message(
+                message,
+                ephemeral=number is not None,
+            )
 
             return
 
@@ -543,15 +562,9 @@ class Queue(commands.Cog):
             """
             separator = "────────────────────"
 
-            queue_value = (
-                f"{value}\n\n{separator}"
-                if value
-                else separator
-            )
-            
-            values = split_value(
-                queue_value
-            )
+            queue_value = f"{value}\n\n{separator}" if value else separator
+
+            values = split_value(queue_value)
 
             for index, field_value in enumerate(values):
                 if index == 0:
@@ -690,11 +703,19 @@ class Queue(commands.Cog):
             return
 
         # First response
-        await interaction.response.send_message(embed=embeds[0])
+        is_ephemeral = number is not None
+
+        await interaction.response.send_message(
+            embed=embeds[0],
+            ephemeral=is_ephemeral,
+        )
 
         # Additional embeds
         for embed in embeds[1:]:
-            await interaction.followup.send(embed=embed)
+            await interaction.followup.send(
+                embed=embed,
+                ephemeral=is_ephemeral,
+            )
 
 
 async def setup(bot):
