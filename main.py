@@ -96,6 +96,8 @@ async def load_extensions():
     await bot.load_extension("cogs.admin")
     await bot.load_extension("cogs.queue")
     await bot.load_extension("cogs.queue_panel")
+    # Load last so all slash commands already exist before checks are attached.
+    await bot.load_extension("cogs.permissions")
 
 
 async def main():
