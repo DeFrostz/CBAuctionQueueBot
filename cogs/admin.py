@@ -86,6 +86,80 @@ class Admin(commands.Cog):
             f"⏳ Time-Space: {time_space}\n" f"Applied to: {', '.join(targets)}"
         )
 
+    @discord.app_commands.command(name="checkconfig", description="View current reward stock and queue limits")
+    @discord.app_commands.choices(category=[discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")])
+    @discord.app_commands.describe(category="Which category to check (All by default)")
+    async def checkconfig(self, interaction: discord.Interaction, category: discord.app_commands.Choice[str] | None = None):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
+            return
+
+        guild_id = str(interaction.guild.id)
+        category_value = category.value if category is not None else "All"
+
+        if category_value == "All":
+            targets = list(CATEGORIES)
+        elif category_value in LINKED:
+            targets = list(LINKED)
+        else:
+            targets = [category_value]
+
+        reward_order = ("CARD", "FEATHER_S", "FEATHER_A")
+        reward_names = {
+            "CARD": "🃏 Card",
+            "FEATHER_S": "🌗 Light-Dark",
+            "FEATHER_A": "⏳ Time-Space",
+        }
+
+        embed = discord.Embed(
+            title="⚙️ Auction Configuration",
+            description="Current reward stock and queue limits",
+        )
+
+        for target in targets:
+            rewards = {
+                row["reward_type"]: row
+                for row in get_rewards(guild_id, target)
+            }
+
+            if not rewards:
+                embed.add_field(
+                    name=f"📂 {target}",
+                    value="Not configured",
+                    inline=False,
+                )
+                continue
+
+            lines = []
+
+            for reward in reward_order:
+                row = rewards.get(reward)
+
+                if row is None:
+                    lines.append(
+                        f"{reward_names[reward]}\n"
+                        "Stock: Not configured\n"
+                        "Limit / Queue: Not configured"
+                    )
+                    continue
+
+                lines.append(
+                    f"{reward_names[reward]}\n"
+                    f"Stock: **{row['stock']}**\n"
+                    f"Limit / Queue: **{row['limit_per_queue']}**"
+                )
+
+            embed.add_field(
+                name=f"📂 {target}",
+                value="\n\n".join(lines),
+                inline=False,
+            )
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True,
+        )
+
     @discord.app_commands.command(name="clearqueues", description="Clear generated auction queues")
     @discord.app_commands.choices(category=[discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")])
     @discord.app_commands.describe(category="Which category to clear, or All")
