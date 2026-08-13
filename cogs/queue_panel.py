@@ -141,10 +141,9 @@ class QueueCategorySelect(discord.ui.Select):
             selected_value,
         )
 
-        await interaction.response.send_message(
-            f"✅ Selected **{selected_name}**. Now click **View Queue**.",
-            ephemeral=True,
-        )
+        # Acknowledge the select interaction silently.
+        # No ephemeral/public message is sent here.
+        await interaction.response.defer()
 
 
 class QueuePanelView(discord.ui.View):
