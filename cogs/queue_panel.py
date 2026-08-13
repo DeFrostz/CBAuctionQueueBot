@@ -25,6 +25,12 @@ CATEGORY_OPTIONS = (
 )
 
 
+# Per-user selection for the shared persistent panel.
+# Key: (guild_id, user_id)
+# Value: (category_name, category_value)
+SELECTED_CATEGORIES = {}
+
+
 class QueueNumberModal(discord.ui.Modal, title="View Auction Queue"):
     queue_number = discord.ui.TextInput(
         label="Queue Number",
@@ -110,11 +116,12 @@ class QueueCategorySelect(discord.ui.Select):
         ]
 
         super().__init__(
-            placeholder="Select auction category...",
+            placeholder="1. Select auction category...",
             min_values=1,
             max_values=1,
             options=options,
-            custom_id="auction_queue:category",
+            custom_id="auction_queue:category_v2",
+            row=0,
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -126,20 +133,59 @@ class QueueCategorySelect(discord.ui.Select):
             if value == selected_value
         )
 
-        await interaction.response.send_modal(
-            QueueNumberModal(
-                self.bot,
-                selected_name,
-                selected_value,
-            )
+        guild_id = interaction.guild.id if interaction.guild else 0
+        key = (guild_id, interaction.user.id)
+
+        SELECTED_CATEGORIES[key] = (
+            selected_name,
+            selected_value,
+        )
+
+        await interaction.response.send_message(
+            f"✅ Selected **{selected_name}**. Now click **View Queue**.",
+            ephemeral=True,
         )
 
 
 class QueuePanelView(discord.ui.View):
     def __init__(self, bot):
-        # timeout=None + fixed custom_id makes the select persistent.
         super().__init__(timeout=None)
+        self.bot = bot
         self.add_item(QueueCategorySelect(bot))
+
+    @discord.ui.button(
+        label="View Queue",
+        emoji="🔎",
+        style=discord.ButtonStyle.primary,
+        custom_id="auction_queue:view_queue_v2",
+        row=1,
+    )
+    async def view_queue(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+        guild_id = interaction.guild.id if interaction.guild else 0
+        key = (guild_id, interaction.user.id)
+
+        selected = SELECTED_CATEGORIES.get(key)
+
+        if selected is None:
+            await interaction.response.send_message(
+                "❌ Please select an auction category first.",
+                ephemeral=True,
+            )
+            return
+
+        category_name, category_value = selected
+
+        await interaction.response.send_modal(
+            QueueNumberModal(
+                self.bot,
+                category_name,
+                category_value,
+            )
+        )
 
 
 class QueuePanel(commands.Cog):
@@ -171,8 +217,9 @@ class QueuePanel(commands.Cog):
         embed = discord.Embed(
             title="📋 Auction Queue",
             description=(
-                "Select the auction category below, then enter the "
-                "**Queue Number** you want to view.\n\n"
+                "**1.** Select the auction category below.\n"
+                "**2.** Click **View Queue**.\n"
+                "**3.** Enter the **Queue Number** you want to view.\n\n"
                 "🏆 **Guild League / League Prize** are linked and use "
                 "one shared queue sequence.\n"
                 "⚔️ **Emperium Overrun** has its own queue sequence.\n"
@@ -192,8 +239,8 @@ class QueuePanel(commands.Cog):
 
 
 async def setup(bot):
-    # Register the persistent select handler so previously-posted panels
-    # continue working after the bot restarts.
+    # Register the persistent component handlers so previously-posted
+    # v2 panels continue working after the bot restarts.
     bot.add_view(QueuePanelView(bot))
 
     await bot.add_cog(
