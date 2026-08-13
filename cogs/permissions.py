@@ -7,6 +7,7 @@ from discord.ext import commands
 ADMIN_ONLY_COMMANDS = {
     "setallstock",
     "setalllimit",
+    "checkconfig",
     "clearqueues",
     "generate",
     "clearconfig",
