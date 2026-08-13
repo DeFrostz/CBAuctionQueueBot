@@ -95,6 +95,7 @@ async def on_guild_join(guild):
 async def load_extensions():
     await bot.load_extension("cogs.admin")
     await bot.load_extension("cogs.queue")
+    await bot.load_extension("cogs.queue_panel")
 
 
 async def main():
