@@ -3,6 +3,28 @@ import discord
 from discord.ext import commands
 
 
+CATEGORY_OPTIONS = (
+    (
+        "Guild League / League Prize",
+        "Guild League",
+        "🏆",
+        "Guild League and League Prize share the same queue sequence",
+    ),
+    (
+        "Emperium Overrun",
+        "Emperium Overrun",
+        "⚔️",
+        "View an Emperium Overrun queue",
+    ),
+    (
+        "Designed Auction",
+        "Designed Auction",
+        "📂",
+        "View a Designed Auction queue",
+    ),
+)
+
+
 class QueueNumberModal(discord.ui.Modal, title="View Auction Queue"):
     queue_number = discord.ui.TextInput(
         label="Queue Number",
@@ -12,9 +34,11 @@ class QueueNumberModal(discord.ui.Modal, title="View Auction Queue"):
         max_length=6,
     )
 
-    def __init__(self, bot):
+    def __init__(self, bot, category_name, category_value):
         super().__init__()
         self.bot = bot
+        self.category_name = category_name
+        self.category_value = category_value
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -40,13 +64,18 @@ class QueueNumberModal(discord.ui.Modal, title="View Auction Queue"):
             return
 
         try:
-            # Reuse the exact same logic as:
-            # /queuelist number:<number>
+            # /queuelist already knows that Guild League and League Prize
+            # are linked. Passing Guild League here therefore queries both.
+            category_choice = discord.app_commands.Choice(
+                name=self.category_name,
+                value=self.category_value,
+            )
+
             await queue_cog.queuelist.callback(
                 queue_cog,
                 interaction,
                 number,
-                None,
+                category_choice,
             )
 
         except Exception as error:
@@ -66,26 +95,51 @@ class QueueNumberModal(discord.ui.Modal, title="View Auction Queue"):
                 )
 
 
-class QueuePanelView(discord.ui.View):
+class QueueCategorySelect(discord.ui.Select):
     def __init__(self, bot):
-        # timeout=None + a fixed custom_id makes this a persistent view.
-        super().__init__(timeout=None)
         self.bot = bot
 
-    @discord.ui.button(
-        label="View Queue",
-        emoji="🔎",
-        style=discord.ButtonStyle.primary,
-        custom_id="auction_queue:view_queue",
-    )
-    async def view_queue(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button,
-    ):
-        await interaction.response.send_modal(
-            QueueNumberModal(self.bot)
+        options = [
+            discord.SelectOption(
+                label=label,
+                value=value,
+                emoji=emoji,
+                description=description,
+            )
+            for label, value, emoji, description in CATEGORY_OPTIONS
+        ]
+
+        super().__init__(
+            placeholder="Select auction category...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="auction_queue:category",
         )
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_value = self.values[0]
+
+        selected_name = next(
+            label
+            for label, value, _, _ in CATEGORY_OPTIONS
+            if value == selected_value
+        )
+
+        await interaction.response.send_modal(
+            QueueNumberModal(
+                self.bot,
+                selected_name,
+                selected_value,
+            )
+        )
+
+
+class QueuePanelView(discord.ui.View):
+    def __init__(self, bot):
+        # timeout=None + fixed custom_id makes the select persistent.
+        super().__init__(timeout=None)
+        self.add_item(QueueCategorySelect(bot))
 
 
 class QueuePanel(commands.Cog):
@@ -117,8 +171,12 @@ class QueuePanel(commands.Cog):
         embed = discord.Embed(
             title="📋 Auction Queue",
             description=(
-                "Press **View Queue** and enter the queue number "
-                "you want to check.\n\n"
+                "Select the auction category below, then enter the "
+                "**Queue Number** you want to view.\n\n"
+                "🏆 **Guild League / League Prize** are linked and use "
+                "one shared queue sequence.\n"
+                "⚔️ **Emperium Overrun** has its own queue sequence.\n"
+                "📂 **Designed Auction** has its own queue sequence.\n\n"
                 "The queue result will only be visible to you."
             ),
         )
@@ -134,7 +192,7 @@ class QueuePanel(commands.Cog):
 
 
 async def setup(bot):
-    # Register the persistent button handler so previously-posted panels
+    # Register the persistent select handler so previously-posted panels
     # continue working after the bot restarts.
     bot.add_view(QueuePanelView(bot))
 
