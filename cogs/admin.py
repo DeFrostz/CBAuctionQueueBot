@@ -62,7 +62,9 @@ class Admin(commands.Cog):
     @discord.app_commands.command(name="setalllimit", description="Set limits for all three rewards at once")
     @discord.app_commands.choices(category=[discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")])
     @discord.app_commands.describe(
-        card="Card amount per queue", light_dark="Light-Dark amount per queue", time_space="Time-Space amount per queue",
+        card="Card amount per queue (0 disables generation)",
+        light_dark="Light-Dark amount per queue (0 disables generation)",
+        time_space="Time-Space amount per queue (0 disables generation)",
         category="Which category to apply (Guild League default). Guild League and League Prize are linked.",
     )
     async def setalllimit(self, interaction: discord.Interaction, card: int, light_dark: int, time_space: int, category: discord.app_commands.Choice[str] | None = None):
@@ -70,8 +72,8 @@ class Admin(commands.Cog):
             await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
             return
         limit_values = {"CARD": card, "FEATHER_S": light_dark, "FEATHER_A": time_space}
-        if any(limit < 1 for limit in limit_values.values()):
-            await interaction.response.send_message("❌ Every limit must be 1 or greater", ephemeral=True)
+        if any(limit < 0 for limit in limit_values.values()):
+            await interaction.response.send_message("❌ Every limit must be 0 or greater", ephemeral=True)
             return
         guild_id = str(interaction.guild.id)
         category_value = category.value if category is not None else CATEGORIES[0]
