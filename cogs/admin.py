@@ -62,9 +62,9 @@ class Admin(commands.Cog):
     @discord.app_commands.command(name="setalllimit", description="Set limits for all three rewards at once")
     @discord.app_commands.choices(category=[discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")])
     @discord.app_commands.describe(
-        card="Card amount per queue (0 disables generation)",
-        light_dark="Light-Dark amount per queue (0 disables generation)",
-        time_space="Time-Space amount per queue (0 disables generation)",
+        card="Card amount per queue (0 = Extra only)",
+        light_dark="Light-Dark amount per queue (0 = Extra only)",
+        time_space="Time-Space amount per queue (0 = Extra only)",
         category="Which category to apply (Guild League default). Guild League and League Prize are linked.",
     )
     async def setalllimit(self, interaction: discord.Interaction, card: int, light_dark: int, time_space: int, category: discord.app_commands.Choice[str] | None = None):
@@ -198,10 +198,20 @@ class Admin(commands.Cog):
             reward_map = {row["reward_type"]: row for row in rows}
             if any(reward not in reward_map for reward in required):
                 skipped_categories.append((cat, "missing reward config")); continue
-            if any(int(reward_map[reward]["limit_per_queue"]) < 1 for reward in required):
-                skipped_categories.append((cat, "missing limit")); continue
-            if any(int(reward_map[reward]["stock"]) < 1 for reward in required):
-                skipped_categories.append((cat, "missing stock")); continue
+            if any(int(reward_map[reward]["limit_per_queue"]) < 0 for reward in required):
+                skipped_categories.append((cat, "invalid negative limit")); continue
+
+            active_rewards = [
+                reward for reward in required
+                if int(reward_map[reward]["limit_per_queue"]) > 0
+            ]
+
+            if not active_rewards:
+                skipped_categories.append((cat, "all limits are 0")); continue
+
+            if any(int(reward_map[reward]["stock"]) < 1 for reward in active_rewards):
+                skipped_categories.append((cat, "missing stock for active reward")); continue
+
             valid_categories.append(cat)
         if not valid_categories:
             lines = ["❌ No categories are ready to generate."]
