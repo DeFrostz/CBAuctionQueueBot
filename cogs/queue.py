@@ -16,6 +16,22 @@ LINKED = (
     "League Prize",
 )
 
+CATEGORY_CHOICES = [
+    discord.app_commands.Choice(
+        name="Guild League / League Prize",
+        value="Guild League",
+    ),
+    discord.app_commands.Choice(
+        name="Emperium Overrun",
+        value="Emperium Overrun",
+    ),
+    discord.app_commands.Choice(
+        name="Designed Auction",
+        value="Designed Auction",
+    ),
+    discord.app_commands.Choice(name="All", value="All"),
+]
+
 REWARD_ORDER = (
     "CARD",
     "FEATHER_S",
@@ -84,12 +100,7 @@ class Queue(commands.Cog):
         name="extra",
         description="View remaining rewards that are not assigned to a queue",
     )
-    @discord.app_commands.choices(
-        category=[
-            discord.app_commands.Choice(name=cat, value=cat)
-            for cat in (*CATEGORIES, "All")
-        ]
-    )
+    @discord.app_commands.choices(category=CATEGORY_CHOICES)
     @discord.app_commands.describe(category="Optional category (All by default)")
     async def extra(
         self,
@@ -141,13 +152,11 @@ class Queue(commands.Cog):
                 )
                 remaining = max(stock - assigned, 0)
 
-                # /extra is a remaining-items view, so hide empty rewards.
                 if remaining <= 0:
                     continue
 
                 start_index = assigned
 
-                # Feather A positions continue after all Feather S stock.
                 if reward == "FEATHER_A":
                     feather_s = rewards.get("FEATHER_S")
                     feather_s_stock = int(feather_s["stock"]) if feather_s else 0
@@ -164,7 +173,6 @@ class Queue(commands.Cog):
                     f"Positions:\n{positions}"
                 )
 
-            # Hide categories where every reward has zero remaining.
             if not category_lines:
                 continue
 
@@ -188,12 +196,7 @@ class Queue(commands.Cog):
         name="queuelist",
         description="View queues by number and/or category",
     )
-    @discord.app_commands.choices(
-        category=[
-            discord.app_commands.Choice(name=cat, value=cat)
-            for cat in (*CATEGORIES, "All")
-        ]
-    )
+    @discord.app_commands.choices(category=CATEGORY_CHOICES)
     @discord.app_commands.describe(
         number="Optional queue number",
         category="Optional category (All by default)",
@@ -229,7 +232,11 @@ class Queue(commands.Cog):
                     data.extend(get_all_queue(guild_id, category_name))
 
         if not data:
-            category_name = category.value if category is not None else None
+            if category is not None and category.value in LINKED:
+                category_name = "Guild League / League Prize"
+            else:
+                category_name = category.value if category is not None else None
+
             if number is not None and category_name is not None:
                 message = f"❌ Queue #{number} not found in **{category_name}**"
             elif number is not None:
