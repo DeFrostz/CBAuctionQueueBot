@@ -17,6 +17,29 @@ from generator import generate_queue, build_extra_pool, generate_extra_queues
 
 LINKED = ("Guild League", "League Prize")
 
+# Set commands intentionally keep Guild League and League Prize separate.
+SET_CATEGORY_CHOICES = [
+    discord.app_commands.Choice(name=cat, value=cat)
+    for cat in (*CATEGORIES, "All")
+]
+
+# Other commands expose the linked categories as one logical choice.
+LINKED_CATEGORY_CHOICES = [
+    discord.app_commands.Choice(
+        name="Guild League / League Prize",
+        value="Guild League",
+    ),
+    discord.app_commands.Choice(
+        name="Emperium Overrun",
+        value="Emperium Overrun",
+    ),
+    discord.app_commands.Choice(
+        name="Designed Auction",
+        value="Designed Auction",
+    ),
+    discord.app_commands.Choice(name="All", value="All"),
+]
+
 
 class Admin(commands.Cog):
     def __init__(self, bot):
@@ -33,9 +56,7 @@ class Admin(commands.Cog):
     @discord.app_commands.command(
         name="setallstock", description="Set stock for all three rewards at once"
     )
-    @discord.app_commands.choices(
-        category=[discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")]
-    )
+    @discord.app_commands.choices(category=SET_CATEGORY_CHOICES)
     @discord.app_commands.describe(
         card="Total Card stock", light_dark="Total Light-Dark stock",
         time_space="Total Time-Space stock", category="Which category to apply (Guild League default)",
@@ -60,12 +81,12 @@ class Admin(commands.Cog):
         )
 
     @discord.app_commands.command(name="setalllimit", description="Set limits for all three rewards at once")
-    @discord.app_commands.choices(category=[discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")])
+    @discord.app_commands.choices(category=SET_CATEGORY_CHOICES)
     @discord.app_commands.describe(
         card="Card amount per queue (0 = Extra only)",
         light_dark="Light-Dark amount per queue (0 = Extra only)",
         time_space="Time-Space amount per queue (0 = Extra only)",
-        category="Which category to apply (Guild League default). Guild League and League Prize are linked.",
+        category="Which category to apply. Guild League and League Prize can be set separately.",
     )
     async def setalllimit(self, interaction: discord.Interaction, card: int, light_dark: int, time_space: int, category: discord.app_commands.Choice[str] | None = None):
         if interaction.guild is None:
@@ -77,9 +98,7 @@ class Admin(commands.Cog):
             return
         guild_id = str(interaction.guild.id)
         category_value = category.value if category is not None else CATEGORIES[0]
-        if category_value == "All": targets = list(CATEGORIES)
-        elif category_value in LINKED: targets = list(LINKED)
-        else: targets = [category_value]
+        targets = list(CATEGORIES) if category_value == "All" else [category_value]
         for target in targets:
             for reward, limit in limit_values.items():
                 set_reward_limit(guild_id, reward, limit, target)
@@ -89,7 +108,7 @@ class Admin(commands.Cog):
         )
 
     @discord.app_commands.command(name="checkconfig", description="View current reward stock and queue limits")
-    @discord.app_commands.choices(category=[discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")])
+    @discord.app_commands.choices(category=LINKED_CATEGORY_CHOICES)
     @discord.app_commands.describe(category="Which category to check (All by default)")
     async def checkconfig(self, interaction: discord.Interaction, category: discord.app_commands.Choice[str] | None = None):
         if interaction.guild is None:
@@ -163,7 +182,7 @@ class Admin(commands.Cog):
         )
 
     @discord.app_commands.command(name="clearqueues", description="Clear generated auction queues")
-    @discord.app_commands.choices(category=[discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")])
+    @discord.app_commands.choices(category=LINKED_CATEGORY_CHOICES)
     @discord.app_commands.describe(category="Which category to clear, or All")
     async def clearqueues(self, interaction: discord.Interaction, category: discord.app_commands.Choice[str] | None = None):
         if interaction.guild is None:
@@ -176,12 +195,16 @@ class Admin(commands.Cog):
         category_value = category.value if category is not None else "All"
         if category_value == "All":
             clear_queue(guild_id); message = "all categories"
+        elif category_value in LINKED:
+            for target in LINKED:
+                clear_queue(guild_id, target)
+            message = "**Guild League / League Prize**"
         else:
             clear_queue(guild_id, category_value); message = f"**{category_value}**"
         await interaction.response.send_message(f"🗑️ Cleared queues for {message}.")
 
     @discord.app_commands.command(name="generate", description="Generate auction queue")
-    @discord.app_commands.choices(category=[discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")])
+    @discord.app_commands.choices(category=LINKED_CATEGORY_CHOICES)
     async def generate(self, interaction: discord.Interaction, category: discord.app_commands.Choice[str] | None = None):
         if interaction.guild is None:
             await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
@@ -277,7 +300,7 @@ class Admin(commands.Cog):
             await interaction.followup.send(f"❌ Failed to generate queue: {e}", ephemeral=True)
 
     @discord.app_commands.command(name="clearconfig", description="Clear stock, limits and generated queues")
-    @discord.app_commands.choices(category=[discord.app_commands.Choice(name=cat, value=cat) for cat in (*CATEGORIES, "All")])
+    @discord.app_commands.choices(category=LINKED_CATEGORY_CHOICES)
     async def clearconfig(self, interaction: discord.Interaction, category: discord.app_commands.Choice[str] | None = None):
         if interaction.guild is None:
             await interaction.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
