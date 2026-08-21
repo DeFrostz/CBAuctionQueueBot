@@ -17,13 +17,13 @@ from generator import generate_queue, build_extra_pool, generate_extra_queues
 
 LINKED = ("Guild League", "League Prize")
 
-# Set commands intentionally keep Guild League and League Prize separate.
+# Stock can still be configured separately per category.
 SET_CATEGORY_CHOICES = [
     discord.app_commands.Choice(name=cat, value=cat)
     for cat in (*CATEGORIES, "All")
 ]
 
-# Other commands expose the linked categories as one logical choice.
+# Commands that treat Guild League + League Prize as one linked group.
 LINKED_CATEGORY_CHOICES = [
     discord.app_commands.Choice(
         name="Guild League / League Prize",
@@ -81,12 +81,12 @@ class Admin(commands.Cog):
         )
 
     @discord.app_commands.command(name="setalllimit", description="Set limits for all three rewards at once")
-    @discord.app_commands.choices(category=SET_CATEGORY_CHOICES)
+    @discord.app_commands.choices(category=LINKED_CATEGORY_CHOICES)
     @discord.app_commands.describe(
         card="Card amount per queue (0 = Extra only)",
         light_dark="Light-Dark amount per queue (0 = Extra only)",
         time_space="Time-Space amount per queue (0 = Extra only)",
-        category="Which category to apply. Guild League and League Prize can be set separately.",
+        category="Which category to apply. Guild League / League Prize are linked.",
     )
     async def setalllimit(self, interaction: discord.Interaction, card: int, light_dark: int, time_space: int, category: discord.app_commands.Choice[str] | None = None):
         if interaction.guild is None:
@@ -98,7 +98,12 @@ class Admin(commands.Cog):
             return
         guild_id = str(interaction.guild.id)
         category_value = category.value if category is not None else CATEGORIES[0]
-        targets = list(CATEGORIES) if category_value == "All" else [category_value]
+        if category_value == "All":
+            targets = list(CATEGORIES)
+        elif category_value in LINKED:
+            targets = list(LINKED)
+        else:
+            targets = [category_value]
         for target in targets:
             for reward, limit in limit_values.items():
                 set_reward_limit(guild_id, reward, limit, target)
