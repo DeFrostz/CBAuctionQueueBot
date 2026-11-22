@@ -423,8 +423,10 @@ def set_party_plan(guild_id, party_count, queue_start, card_start, astro_start):
 def update_party_pointers(guild_id, queue_start, card_start, astro_start, day_closed):
     conn = get_connection()
     conn.execute(
-        "UPDATE party_plan SET queue_start=?, card_start=?, astro_start=?, day_closed=?, "
-        "last_card_party=NULL, last_astro_party=NULL WHERE guild_id=?",
+        # last_card_party / last_astro_party stay: they describe the day that
+        # just ended (/partynote) until the next /generate replaces them.
+        "UPDATE party_plan SET queue_start=?, card_start=?, astro_start=?, day_closed=? "
+        "WHERE guild_id=?",
         (queue_start, card_start, astro_start, day_closed, guild_id),
     )
     conn.commit()

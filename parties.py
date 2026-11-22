@@ -512,3 +512,45 @@ def preview_party_plan(guild_id, plan, view, header):
         ),
         "notes": notes,
     }
+
+
+def build_party_note(guild_id, plan, date):
+    """
+    Short note about where today's rotation ended, or None without queues.
+
+    Reads the generated queues and the "last +1" parties saved by /generate,
+    so it still describes the same day after /endday. When a reward had no
+    +1 today, the latest separated party is still the one from the days
+    before: the party right before today's rotation start.
+    """
+    last_queue = get_max_queue_no(guild_id, LINKED)
+    if last_queue == 0:
+        return None
+
+    count = plan["party_count"]
+    queue_start = effective_queue_start(plan)
+
+    def has_stock(group):
+        return any(
+            int(row["stock"]) > 0
+            for category in LINKED
+            for row in get_rewards(guild_id, category)
+            if row["reward_type"] in SPREAD_GROUPS[group]
+        )
+
+    def latest(group, last_party):
+        if last_party is not None:
+            return f"P{last_party}"
+        if not has_stock(group):
+            return "-"
+        # The rotation starts right after the last +1 of the day before.
+        start = group_start(plan, group)
+        return f"P{(start - 2) % count + 1}"
+
+    lines = [
+        f"Note {date}",
+        f"Lastest Seperated Queue Card  : {latest('card', plan['last_card_party'])}",
+        f"Lastest Seperated Queue Astrocore : {latest('astro', plan['last_astro_party'])}",
+        f"Lastest Normal Queue Count : P{party_of(last_queue, queue_start, count)}",
+    ]
+    return "```\n" + "\n".join(lines) + "\n```"

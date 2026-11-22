@@ -31,6 +31,7 @@ from database import (
 from generator import check_categories, generate_all
 from parties import (
     assign_spread,
+    build_party_note,
     end_day,
     preview_party_plan,
     spread_summary_lines,
@@ -260,6 +261,28 @@ class Admin(commands.Cog):
                 "Then run /generate for the next day.",
             ])
         )
+
+    @discord.app_commands.command(
+        name="partynote",
+        description="Post where today's Card, Astrocore and queues ended (by party)",
+    )
+    @discord.app_commands.describe(date="Heading date, example 19/11")
+    async def partynote(self, interaction: discord.Interaction, date: str):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
+            return
+        guild_id = str(interaction.guild.id)
+        plan = get_party_plan(guild_id)
+        if plan is None:
+            await interaction.response.send_message("❌ No party plan yet. Use /setparty first.", ephemeral=True)
+            return
+        note = build_party_note(guild_id, plan, date.strip())
+        if note is None:
+            await interaction.response.send_message(
+                "❌ No Guild League / League Prize queues generated. Use /generate first.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(note)
 
     @discord.app_commands.command(
         name="partyplan",
