@@ -11,7 +11,9 @@ from constants import (
     list_offset,
     position,
 )
+from parties import party_label
 from database import (
+    get_party_plan,
     get_all_queue,
     get_queue,
     get_rewards,
@@ -296,16 +298,18 @@ class Queue(commands.Cog):
             embed_title,
             queue_no,
             value,
+            label=None,
         ):
             separator = "────────────────────"
             queue_value = f"{value}\n\n{separator}" if value else separator
             values = split_value(queue_value)
 
             for index, field_value in enumerate(values):
+                title = f"Queue #{queue_no}" + (f" · {label}" if label else "")
                 field_name = (
-                    f"📋 Queue #{queue_no}"
+                    f"📋 {title}"
                     if index == 0
-                    else f"↳ Queue #{queue_no} (continued)"
+                    else f"↳ {title} (continued)"
                 )
                 estimated_size = embed_size(current_embed) + len(field_name) + len(field_value)
 
@@ -322,6 +326,7 @@ class Queue(commands.Cog):
 
             return current_embed
 
+        party_plan = get_party_plan(guild_id)
         linked_keys = [key for key in queues if key[0] == "LINKED"]
         if linked_keys:
             embed_title = "🏆 Guild League / League Prize"
@@ -348,6 +353,7 @@ class Queue(commands.Cog):
                     embed_title,
                     queue_no,
                     value,
+                    party_label(queue_no, party_plan),
                 )
 
             if embed.fields:

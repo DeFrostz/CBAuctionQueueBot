@@ -120,6 +120,20 @@ def init_database():
         )
         """)
 
+    # Party plan: which party each Guild League / League Prize queue belongs
+    # to, and where the next Card goes. Rows are never touched by the reward
+    # or queue tables.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS party_plan (
+        guild_id TEXT PRIMARY KEY,
+        party_count INTEGER NOT NULL,
+        queue_start INTEGER NOT NULL,
+        card_start INTEGER NOT NULL,
+        day_closed INTEGER NOT NULL DEFAULT 0,
+        last_card_party INTEGER
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -352,5 +366,90 @@ def clear_rewards(guild_id, category=None):
             (guild_id, category),
         )
 
+    conn.commit()
+    conn.close()
+
+
+# -------------------------
+# Party plan (Guild League / League Prize)
+# -------------------------
+
+
+def get_party_plan(guild_id):
+    """Return the party plan row for a guild, or None if it is not set."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM party_plan WHERE guild_id=?", (guild_id,)
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def set_party_plan(guild_id, party_count, queue_start, card_start):
+    conn = get_connection()
+    conn.execute(
+        """
+    INSERT INTO party_plan
+    (guild_id, party_count, queue_start, card_start, day_closed)
+    VALUES (?, ?, ?, ?, 0)
+    ON CONFLICT(guild_id)
+    DO UPDATE SET
+        party_count=excluded.party_count,
+        queue_start=excluded.queue_start,
+        card_start=excluded.card_start,
+        day_closed=0,
+        last_card_party=NULL
+    """,
+        (guild_id, party_count, queue_start, card_start),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_party_pointers(guild_id, queue_start, card_start, day_closed):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE party_plan SET queue_start=?, card_start=?, day_closed=?, last_card_party=NULL WHERE guild_id=?",
+        (queue_start, card_start, day_closed, guild_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_day_closed(guild_id, closed):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE party_plan SET day_closed=? WHERE guild_id=?",
+        (1 if closed else 0, guild_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_max_queue_no(guild_id, categories, reward_type=None):
+    """Highest queue number across the given categories (0 if none)."""
+    categories = list(categories)
+    marks = ",".join("?" for _ in categories)
+    sql = (
+        "SELECT COALESCE(MAX(queue_no), 0) FROM queue_plan "
+        f"WHERE guild_id=? AND category IN ({marks})"
+    )
+    params = [guild_id, *categories]
+    if reward_type is not None:
+        sql += " AND reward_type=?"
+        params.append(reward_type)
+    conn = get_connection()
+    result = conn.execute(sql, params).fetchone()
+    conn.close()
+    return result[0]
+
+
+def set_last_card_party(guild_id, party):
+    """Party that received the last Card today (None = no Card placed)."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE party_plan SET last_card_party=? WHERE guild_id=?",
+        (party, guild_id),
+    )
     conn.commit()
     conn.close()

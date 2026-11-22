@@ -13,6 +13,8 @@ ADMIN_ONLY_COMMANDS = {
     "clearconfig",
     "extra",
     "queuepanel",
+    "setparty",
+    "endday",
 }
 
 
