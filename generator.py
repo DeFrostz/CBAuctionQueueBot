@@ -8,12 +8,13 @@ from constants import (
 from database import clear_queue, get_rewards, save_queue_positions_bulk
 
 
-def reward_values(rewards):
+def reward_values(rewards, exclude=()):
     """
     Return ({reward: stock}, {reward: limit}) for every reward type.
 
     A reward with no row (optional rewards that were never set) counts as
-    stock 0 / limit 0.
+    stock 0 / limit 0. Rewards in `exclude` are handled outside the normal
+    queues (spread by party), so their limit counts as 0 here.
     """
     reward_map = {row["reward_type"]: row for row in rewards}
     stocks = {}
@@ -23,6 +24,8 @@ def reward_values(rewards):
         row = reward_map.get(reward)
         stocks[reward] = int(row["stock"]) if row is not None else 0
         limits[reward] = int(row["limit_per_queue"]) if row is not None else 0
+        if reward in exclude:
+            limits[reward] = 0
 
     return stocks, limits
 
@@ -32,7 +35,7 @@ def has_required_rewards(rewards):
     return all(reward in reward_map for reward in REQUIRED_REWARDS)
 
 
-def get_queue_count_from_rewards(rewards):
+def get_queue_count_from_rewards(rewards, exclude=()):
     """
     Calculate queue count using only rewards whose limit is > 0.
 
@@ -44,7 +47,7 @@ def get_queue_count_from_rewards(rewards):
     if not rewards or not has_required_rewards(rewards):
         return 0
 
-    stocks, limits = reward_values(rewards)
+    stocks, limits = reward_values(rewards, exclude)
 
     counts = [
         stocks[reward] // limits[reward]
@@ -59,7 +62,7 @@ def get_queue_count_from_rewards(rewards):
     return min(counts)
 
 
-def generate_queue(guild_id, rewards, start_no=1):
+def generate_queue(guild_id, rewards, start_no=1, exclude=()):
     """
     Generate normal queues for one category.
 
@@ -69,8 +72,8 @@ def generate_queue(guild_id, rewards, start_no=1):
         return 0
 
     category = rewards[0]["category"]
-    stocks, limits = reward_values(rewards)
-    queue_count = get_queue_count_from_rewards(rewards)
+    stocks, limits = reward_values(rewards, exclude)
+    queue_count = get_queue_count_from_rewards(rewards, exclude)
 
     # Next unused index of each reward inside its tab. Rewards that share a
     # tab (Light-Dark / Time-Space, the Astrocore kinds) start after the
@@ -94,7 +97,7 @@ def generate_queue(guild_id, rewards, start_no=1):
     return queue_count
 
 
-def build_extra_pool(category_rewards, normal_queue_counts):
+def build_extra_pool(category_rewards, normal_queue_counts, exclude=()):
     """
     Build real remaining positions from multiple categories.
 
@@ -104,7 +107,7 @@ def build_extra_pool(category_rewards, normal_queue_counts):
     pool = {reward: [] for reward in REWARD_TYPES}
 
     for category, rewards in category_rewards.items():
-        stocks, limits = reward_values(rewards)
+        stocks, limits = reward_values(rewards, exclude)
         queue_count = normal_queue_counts.get(category, 0)
 
         for reward in REWARD_TYPES:
@@ -196,12 +199,12 @@ def generate_extra_queues(guild_id, extra_pool, limits, start_no):
     return extra_queue_count, remaining
 
 
-def get_skip_reason(rewards):
+def get_skip_reason(rewards, exclude=()):
     """Return why a category cannot be generated, or None if it is ready."""
     if not has_required_rewards(rewards):
         return "missing reward config"
 
-    stocks, limits = reward_values(rewards)
+    stocks, limits = reward_values(rewards, exclude)
 
     if any(limit < 0 for limit in limits.values()):
         return "invalid negative limit"
@@ -217,7 +220,7 @@ def get_skip_reason(rewards):
     return None
 
 
-def check_categories(guild_id, categories):
+def check_categories(guild_id, categories, exclude=()):
     """
     Split categories into ready and skipped.
 
@@ -229,7 +232,7 @@ def check_categories(guild_id, categories):
 
     for category in categories:
         rows = get_rewards(guild_id, category)
-        reason = get_skip_reason(rows)
+        reason = get_skip_reason(rows, exclude if category in LINKED else ())
 
         if reason:
             skipped.append((category, reason))
@@ -239,7 +242,7 @@ def check_categories(guild_id, categories):
     return ready, skipped
 
 
-def generate_all(guild_id, category_rewards):
+def generate_all(guild_id, category_rewards, exclude=()):
     """
     Regenerate queues for every ready category (from check_categories).
 
@@ -263,7 +266,9 @@ def generate_all(guild_id, category_rewards):
 
     for category, rows in category_rewards.items():
         start_no = linked_next_queue_no if category in LINKED else 1
-        count = generate_queue(guild_id, rows, start_no)
+        count = generate_queue(
+            guild_id, rows, start_no, exclude if category in LINKED else ()
+        )
 
         if category in LINKED:
             linked_next_queue_no += count
@@ -291,9 +296,12 @@ def generate_all(guild_id, category_rewards):
     extra_pool = build_extra_pool(
         {cat: category_rewards[cat] for cat in linked_ready},
         {cat: normal_queue_counts[cat] for cat in linked_ready},
+        exclude,
     )
 
-    linked_limits = [reward_values(category_rewards[cat])[1] for cat in linked_ready]
+    linked_limits = [
+        reward_values(category_rewards[cat], exclude)[1] for cat in linked_ready
+    ]
     limits = dict(linked_limits[0])
 
     extra_count, remaining_extra = generate_extra_queues(

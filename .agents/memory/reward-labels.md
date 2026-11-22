@@ -9,3 +9,5 @@ The user-facing reward names are `Card`, `Light-Dark`, and `Time-Space`; existin
 
 **How to apply:** Change visible labels through command choices and display mappings, but keep the internal keys stable.
 Astrocore rewards use internal keys `ASTRO_DS` (Destroyer Stardust Pack), `ASTRO_DC` (Destroyer Starcore), `ASTRO_GS` (Guardian Stardust Pack) and `ASTRO_GC` (Guardian Starcore). They share one in-game tab, laid out in the order Guardian Starcore, Destroyer Starcore, Guardian Stardust, Destroyer Stardust (see `REWARD_LISTS` in `constants.py`), and are optional: an unset one counts as stock 0 / limit 0.
+
+With a party plan set (`/setparty`), Card and Astrocore are "spread" rewards (`SPREAD_GROUPS` in `constants.py`): their limit is a cap per queue (0 = no cap), they stay out of the queue count, and each queue gets pool // queues plus a +1 for the remainder along the party rotation. Card and Astrocore have separate rotation pointers (`card_start`, `astro_start`). `/setrank` fills GL and LP from `RANK_TABLE`.

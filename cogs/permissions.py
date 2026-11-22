@@ -16,6 +16,7 @@ ADMIN_ONLY_COMMANDS = {
     "setparty",
     "endday",
     "partyplan",
+    "setrank",
 }
 
 

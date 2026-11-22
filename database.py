@@ -131,16 +131,19 @@ def init_database():
         card_start INTEGER NOT NULL,
         day_closed INTEGER NOT NULL DEFAULT 0,
         last_card_party INTEGER,
-        used_queue_start INTEGER
+        used_queue_start INTEGER,
+        astro_start INTEGER,
+        last_astro_party INTEGER
     )
     """)
 
-    # Migration: party_plan was created without used_queue_start.
+    # Migration: older party_plan tables miss the newer columns.
     party_cols = [
         r[1] for r in cursor.execute("PRAGMA table_info(party_plan)").fetchall()
     ]
-    if "used_queue_start" not in party_cols:
-        cursor.execute("ALTER TABLE party_plan ADD COLUMN used_queue_start INTEGER")
+    for column in ("used_queue_start", "astro_start", "last_astro_party"):
+        if column not in party_cols:
+            cursor.execute(f"ALTER TABLE party_plan ADD COLUMN {column} INTEGER")
 
     conn.commit()
     conn.close()
@@ -393,33 +396,36 @@ def get_party_plan(guild_id):
     return row
 
 
-def set_party_plan(guild_id, party_count, queue_start, card_start):
+def set_party_plan(guild_id, party_count, queue_start, card_start, astro_start):
     conn = get_connection()
     conn.execute(
         """
     INSERT INTO party_plan
-    (guild_id, party_count, queue_start, card_start, day_closed)
-    VALUES (?, ?, ?, ?, 0)
+    (guild_id, party_count, queue_start, card_start, astro_start, day_closed)
+    VALUES (?, ?, ?, ?, ?, 0)
     ON CONFLICT(guild_id)
     DO UPDATE SET
         party_count=excluded.party_count,
         queue_start=excluded.queue_start,
         card_start=excluded.card_start,
+        astro_start=excluded.astro_start,
         day_closed=0,
         last_card_party=NULL,
+        last_astro_party=NULL,
         used_queue_start=NULL
     """,
-        (guild_id, party_count, queue_start, card_start),
+        (guild_id, party_count, queue_start, card_start, astro_start),
     )
     conn.commit()
     conn.close()
 
 
-def update_party_pointers(guild_id, queue_start, card_start, day_closed):
+def update_party_pointers(guild_id, queue_start, card_start, astro_start, day_closed):
     conn = get_connection()
     conn.execute(
-        "UPDATE party_plan SET queue_start=?, card_start=?, day_closed=?, last_card_party=NULL WHERE guild_id=?",
-        (queue_start, card_start, day_closed, guild_id),
+        "UPDATE party_plan SET queue_start=?, card_start=?, astro_start=?, day_closed=?, "
+        "last_card_party=NULL, last_astro_party=NULL WHERE guild_id=?",
+        (queue_start, card_start, astro_start, day_closed, guild_id),
     )
     conn.commit()
     conn.close()
@@ -453,12 +459,15 @@ def get_max_queue_no(guild_id, categories, reward_type=None):
     return result[0]
 
 
-def set_last_card_party(guild_id, party):
-    """Party that received the last Card today (None = no Card placed)."""
+def set_last_spread_parties(guild_id, card_party, astro_party):
+    """
+    Party that got the last "+1" of Card / Astrocore today.
+    None means nothing moved, so tomorrow starts where today started.
+    """
     conn = get_connection()
     conn.execute(
-        "UPDATE party_plan SET last_card_party=? WHERE guild_id=?",
-        (party, guild_id),
+        "UPDATE party_plan SET last_card_party=?, last_astro_party=? WHERE guild_id=?",
+        (card_party, astro_party, guild_id),
     )
     conn.commit()
     conn.close()
