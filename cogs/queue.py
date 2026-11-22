@@ -12,12 +12,17 @@ from constants import (
     position,
 )
 from parties import (
+    RANK_AREAS,
     effective_queue_start,
     emperium_extras,
     extra_overview_lines,
+    find_rank,
     party_extra_lines,
     party_label,
     party_of,
+    rank_detail_lines,
+    rank_names,
+    rank_table_lines,
 )
 from database import (
     get_party_plan,
@@ -452,6 +457,56 @@ class Queue(commands.Cog):
                 embed=embed,
                 ephemeral=is_ephemeral,
             )
+
+    async def rank_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ):
+        area = getattr(interaction.namespace, "area", None)
+        area = getattr(area, "value", area) or "gl"
+        if area not in RANK_AREAS:
+            return []
+        return [
+            discord.app_commands.Choice(name=name, value=name)
+            for name in rank_names(area)
+            if current.lower() in name.lower()
+        ][:25]
+
+    @discord.app_commands.command(
+        name="rankinfo",
+        description="See the reward pool, limits and expected result of each rank",
+    )
+    @discord.app_commands.choices(
+        area=[
+            discord.app_commands.Choice(name="Guild League / League Prize", value="gl"),
+            discord.app_commands.Choice(name="Emperium Overrun - Advance", value="Advance"),
+            discord.app_commands.Choice(name="Emperium Overrun - Normal", value="Normal"),
+        ]
+    )
+    @discord.app_commands.describe(
+        area="Which auction",
+        rank="Rank name (GL/LP) or 1-8 (Emperium). Leave empty for the whole table",
+    )
+    @discord.app_commands.autocomplete(rank=rank_autocomplete)
+    async def rankinfo(
+        self,
+        interaction: discord.Interaction,
+        area: discord.app_commands.Choice[str],
+        rank: str | None = None,
+    ):
+        if rank is None or not rank.strip():
+            lines = rank_table_lines(area.value)
+        else:
+            name = find_rank(area.value, rank)
+            lines = rank_detail_lines(area.value, name) if name is not None else None
+            if lines is None:
+                await interaction.response.send_message(
+                    "❌ Unknown rank. Choose one of: " + ", ".join(rank_names(area.value)),
+                    ephemeral=True,
+                )
+                return
+        await interaction.response.send_message("```\n" + "\n".join(lines) + "\n```")
 
 
 async def setup(bot):

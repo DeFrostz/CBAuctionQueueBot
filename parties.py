@@ -24,12 +24,14 @@ from constants import (
     EMPERIUM_CATEGORY,
     EMPERIUM_TABLE,
     LINKED,
+    RANK_TABLE,
     REWARD_NAMES,
     SPREAD_GROUPS,
     SPREAD_REWARDS,
     emperium_rank_values,
     list_offset,
     position,
+    rank_values,
 )
 from database import (
     get_max_queue_no,
@@ -985,3 +987,191 @@ def build_emperium_plan_messages(league, queue_start, count, starts, view, date)
         messages[0] = date + "\n" + messages[0]
 
     return messages
+
+
+# -------------------------
+# Rank information (/rankinfo): tables and expected results, nothing saved
+# -------------------------
+
+RANK_AREAS = {
+    "gl": "Guild League / League Prize",
+    "Advance": "Emperium Overrun Advance",
+    "Normal": "Emperium Overrun Normal",
+}
+
+
+def rank_names(area):
+    """Valid rank names for an area (GL/LP ranks are names, Emperium 1-8)."""
+    if area == "gl":
+        return [name for name, _pool, _limit in RANK_TABLE]
+    return [str(n) for n in range(1, len(EMPERIUM_TABLE[area]) + 1)]
+
+
+def find_rank(area, text):
+    """Match what the user typed to a rank name, or None."""
+    wanted = text.strip().lower().replace("rank", "").strip()
+    for name in rank_names(area):
+        if name.lower() == wanted:
+            return name
+    matches = [name for name in rank_names(area) if wanted and wanted in name.lower()]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _rank_raw(area, rank_name):
+    """(pool, limit) tuples of a rank, or None."""
+    if area == "gl":
+        for name, pool, limit in RANK_TABLE:
+            if name == rank_name:
+                return pool, limit
+        return None
+    ranks = EMPERIUM_TABLE.get(area)
+    if ranks is None or not rank_name.isdigit() or not 1 <= int(rank_name) <= len(ranks):
+        return None
+    return ranks[int(rank_name) - 1]
+
+
+def gl_rank_outcome(rank_name):
+    """Expected Guild League / League Prize result of a rank, win case."""
+    values = rank_values(rank_name)
+    if values is None:
+        return None
+
+    def rows(category):
+        return [
+            {
+                "category": category,
+                "reward_type": reward,
+                "stock": stock,
+                "limit_per_queue": limit,
+            }
+            for reward, (stock, limit) in values.items()
+        ]
+
+    ready = {category: rows(category) for category in LINKED}
+    counts = {
+        category: get_queue_count_from_rewards(category_rows, SPREAD_REWARDS)
+        for category, category_rows in ready.items()
+    }
+    pool = build_extra_pool(ready, counts, SPREAD_REWARDS)
+    _stocks, limits = reward_values(next(iter(ready.values())), SPREAD_REWARDS)
+    extra_count = count_extra_queues(pool, limits)
+    queues = sum(counts.values()) + extra_count
+    if queues == 0:
+        return None
+
+    spread = compute_spread(ready, queues, 1, 16, {"card": 1, "astro": 1})
+    return {
+        "per_side": counts[LINKED[0]],
+        "extra_queues": extra_count,
+        "queues": queues,
+        "limits": limits,
+        "feather_left": {
+            reward: len(pool[reward]) - extra_count * limits[reward]
+            for reward in ("FEATHER_S", "FEATHER_A")
+        },
+        "rewards": spread["rewards"],
+    }
+
+
+def rank_table_lines(area):
+    """Every rank of an area: pool and limit per queue."""
+    lines = []
+    if area == "gl":
+        lines.append("GL/LP: Reward (pool ต่อฝั่ง) | limit ต่อคิว")
+        rows = [(name, pool, limit) for name, pool, limit in RANK_TABLE]
+        width = max(len(name) for name, _p, _l in rows)
+    else:
+        lines.append(f"Emperium {area}: Reward (pool) | limit ต่อคิว")
+        rows = [
+            (str(n), pool, limit)
+            for n, (pool, limit) in enumerate(EMPERIUM_TABLE[area], 1)
+        ]
+        width = 4
+    lines.append(f"{'Rank':<{width}} Card  LD  TS Astro | limit C/LD/TS/A")
+    for name, (card, ld, ts, astro), (lc, lld, lts, la) in rows:
+        lines.append(
+            f"{name:<{width}} {card:>4} {ld:>3} {ts:>3} {astro:>5} | {lc}/{lld}/{lts}/{la}"
+        )
+    lines.append("Astro = ต่อชนิด (ชุดละ 4 ประเภท)")
+    return lines
+
+
+def _spread_phrase(item, gl, unit):
+    """Words for 'everyone gets N, and the remainder goes ...'."""
+    base = item["per_queue"]
+    extra = item["extra"] if "extra" in item else item["bonus"] + item["left"]
+    if gl:
+        tail = f"เศษ +1 ให้ {extra} คิว"
+        only = f"+1 ให้ {extra} คิว"
+    else:
+        tail = f"Extra {extra} {unit}"
+        only = f"Extra {extra} {unit}"
+    if base and extra:
+        return f"ทุกคิวได้ {base}, {tail}"
+    if base:
+        return f"ทุกคิวได้ {base}"
+    return only if extra else "-"
+
+
+def rank_detail_lines(area, rank_name):
+    """Pool, limit and the expected result of one rank."""
+    raw = _rank_raw(area, rank_name)
+    if raw is None:
+        return None
+    (card, ld, ts, astro), (lc, lld, lts, la) = raw
+
+    if area == "gl":
+        title = f"{rank_name} (GL/LP กรณีชนะ)"
+        outcome = gl_rank_outcome(rank_name)
+    else:
+        title = f"Emperium {area} rank {rank_name}"
+        outcome = emperium_outcome(
+            _emperium_rows(emperium_rank_values(area, int(rank_name))), 1, 16,
+            {"card": 1, "astro": 1},
+        )
+    if outcome is None:
+        return None
+
+    pool_label = "Pool ต่อฝั่ง" if area == "gl" else "Pool"
+    lines = [
+        title,
+        f"{pool_label}: Card {card} | ขาวดำ {ld} | แดงดำ {ts} | Astrocore {astro} (ต่อชนิด)",
+        f"Limit ต่อคิว: Card {lc} | ขาวดำ {lld} | แดงดำ {lts} | Astrocore {la} (ต่อชนิด)",
+    ]
+
+    if area == "gl":
+        total = outcome["queues"]
+        detail = f"GL {outcome['per_side']} + LP {outcome['per_side']}"
+        if outcome["extra_queues"]:
+            detail += f" + Extra {outcome['extra_queues']}"
+        lines.append(f"ผล: {total} คิว ({detail})")
+        unit_card = f"รวม 2 ฝั่ง {card * 2} ใบ"
+        unit_astro = f"รวม 2 ฝั่ง {astro * 2} ชุด"
+    else:
+        lines.append(f"ผล: {outcome['queues']} คิว")
+        unit_card = f"pool {card} ใบ"
+        unit_astro = f"pool {astro} ชุด"
+
+    limits = outcome["limits"]
+    lines.append(
+        f"ขาวดำ/แดงดำ: ทุกคิวได้ {limits['FEATHER_S']} / {limits['FEATHER_A']}"
+    )
+    rewards = outcome["rewards"]
+    gl = area == "gl"
+    lines.append(f"Card ({unit_card}): {_spread_phrase(rewards['CARD'], gl, 'ใบ')}")
+    lines.append(
+        f"Astrocore ({unit_astro}, 1 ชุด = 4 ประเภท): "
+        f"{_spread_phrase(rewards['ASTRO_GC'], gl, 'ชุด')}"
+    )
+
+    left = outcome["feather_left"]
+    if left["FEATHER_S"] or left["FEATHER_A"]:
+        lines.append(f"ขนเหลือ (Extra ไม่แจก): ขาวดำ {left['FEATHER_S']} / แดงดำ {left['FEATHER_A']}")
+    else:
+        lines.append("ขนเหลือ: ไม่มี")
+
+    if area == "gl":
+        lines.append("แพ้ => ของ League Prize ลดลง ผลจะต่างจากนี้")
+    else:
+        lines.append("Extra แจกให้ปาร์ตี้ใบ/ชุดละ 1 ตามลำดับปาร์ตี้")
+    return lines
