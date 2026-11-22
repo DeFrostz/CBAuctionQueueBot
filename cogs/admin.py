@@ -305,6 +305,12 @@ class Admin(commands.Cog):
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             return
         messages = result["messages"]
+        if not messages:
+            # e.g. only Astrocore was asked for but it has no stock
+            await interaction.response.send_message(
+                "\n".join(f"ℹ️ {note}" for note in result["notes"]), ephemeral=True
+            )
+            return
         await interaction.response.send_message(messages[0])
         for message in messages[1:]:
             await interaction.followup.send(message)

@@ -497,6 +497,15 @@ def preview_party_plan(guild_id, plan, view, header):
     )
     notes.extend(spread_summary_lines(spread, count))
 
+    if all(
+        spread["rewards"][reward]["total"] == 0
+        for reward in SPREAD_GROUPS["astro"]
+    ):
+        notes.append(
+            "Astrocore: no stock is set for Guild League / League Prize, so it is "
+            "not shown. Use /setrank, or the Astrocore fields of /setallstock."
+        )
+
     return {
         "messages": render_party_views(
             last_queue, spread, queue_start, count, view, header
