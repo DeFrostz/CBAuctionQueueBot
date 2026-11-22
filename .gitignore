@@ -1,0 +1,15 @@
+# Live bot data - never commit
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# Replit
+.pythonlibs/
+.cache/
+.upm/

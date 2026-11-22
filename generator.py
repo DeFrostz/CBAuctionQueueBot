@@ -1,16 +1,6 @@
-from database import save_queue_positions_bulk
+from constants import LINKED, REWARD_TYPES, position
+from database import clear_queue, get_rewards, save_queue_positions_bulk
 
-ITEM_PER_PAGE = 4
-
-REWARD_TYPES = (
-    "CARD",
-    "FEATHER_S",
-    "FEATHER_A",
-)
-
-
-def position(index):
-    return (index // ITEM_PER_PAGE + 1, index % ITEM_PER_PAGE + 1)
 
 
 def get_queue_count_from_rewards(rewards):
@@ -226,3 +216,136 @@ def generate_extra_queues(guild_id, extra_pool, limits, start_no):
     }
 
     return extra_queue_count, remaining
+
+
+def get_skip_reason(rewards):
+    """Return why a category cannot be generated, or None if it is ready."""
+    reward_map = {row["reward_type"]: row for row in rewards}
+
+    if any(reward not in reward_map for reward in REWARD_TYPES):
+        return "missing reward config"
+
+    limits = {
+        reward: int(reward_map[reward]["limit_per_queue"])
+        for reward in REWARD_TYPES
+    }
+
+    if any(limit < 0 for limit in limits.values()):
+        return "invalid negative limit"
+
+    active_rewards = [reward for reward in REWARD_TYPES if limits[reward] > 0]
+
+    if not active_rewards:
+        return "all limits are 0"
+
+    if any(int(reward_map[reward]["stock"]) < 1 for reward in active_rewards):
+        return "missing stock for active reward"
+
+    return None
+
+
+def check_categories(guild_id, categories):
+    """
+    Split categories into ready and skipped.
+
+    Returns ({category: reward rows}, [(category, reason), ...]).
+    The dict keeps the order of `categories`.
+    """
+    ready = {}
+    skipped = []
+
+    for category in categories:
+        rows = get_rewards(guild_id, category)
+        reason = get_skip_reason(rows)
+
+        if reason:
+            skipped.append((category, reason))
+        else:
+            ready[category] = rows
+
+    return ready, skipped
+
+
+def generate_all(guild_id, category_rewards):
+    """
+    Regenerate queues for every ready category (from check_categories).
+
+    Linked categories share one queue sequence. Their leftovers are pooled
+    into GL/LP Extra queues, even when only one of them is ready.
+    """
+    linked_ready = [cat for cat in LINKED if cat in category_rewards]
+
+    # Linked categories share queue numbers, so clear both together to avoid
+    # stale rows from a skipped partner colliding with the new numbers.
+    to_clear = set(category_rewards)
+    if linked_ready:
+        to_clear.update(LINKED)
+
+    for category in to_clear:
+        clear_queue(guild_id, category)
+
+    results = {}
+    normal_queue_counts = {}
+    linked_next_queue_no = 1
+
+    for category, rows in category_rewards.items():
+        start_no = linked_next_queue_no if category in LINKED else 1
+        count = generate_queue(guild_id, rows, start_no)
+
+        if category in LINKED:
+            linked_next_queue_no += count
+
+        normal_queue_counts[category] = count
+        results[category] = {
+            "count": count,
+            "start": start_no,
+            "end": start_no + count - 1 if count > 0 else 0,
+        }
+
+    summary = {
+        "results": results,
+        "extra_count": 0,
+        "extra_start": None,
+        "extra_end": None,
+        "remaining_extra": None,
+        "extra_limits_from": None,
+        "linked_limits_differ": False,
+    }
+
+    if not linked_ready:
+        return summary
+
+    extra_pool = build_extra_pool(
+        {cat: category_rewards[cat] for cat in linked_ready},
+        {cat: normal_queue_counts[cat] for cat in linked_ready},
+    )
+
+    linked_limits = [
+        {
+            row["reward_type"]: int(row["limit_per_queue"])
+            for row in category_rewards[cat]
+        }
+        for cat in linked_ready
+    ]
+    limits = {reward: linked_limits[0][reward] for reward in REWARD_TYPES}
+
+    extra_count, remaining_extra = generate_extra_queues(
+        guild_id,
+        extra_pool,
+        limits,
+        linked_next_queue_no,
+    )
+
+    summary.update(
+        extra_count=extra_count,
+        extra_start=linked_next_queue_no,
+        extra_end=linked_next_queue_no + extra_count - 1,
+        remaining_extra=remaining_extra,
+        extra_limits_from=linked_ready[0],
+        linked_limits_differ=any(
+            {reward: other[reward] for reward in REWARD_TYPES} != limits
+            for other in linked_limits[1:]
+        ),
+    )
+
+    return summary

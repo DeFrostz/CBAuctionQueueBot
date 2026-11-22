@@ -2,47 +2,14 @@ import discord
 
 from discord.ext import commands
 
+from choices import CATEGORY_CHOICES
+from constants import CATEGORIES, LINKED, REWARD_NAMES, REWARD_TYPES, position
 from database import (
     get_all_queue,
     get_queue,
     get_rewards,
     get_assigned_count,
-    CATEGORIES,
 )
-
-
-LINKED = (
-    "Guild League",
-    "League Prize",
-)
-
-CATEGORY_CHOICES = [
-    discord.app_commands.Choice(
-        name="Guild League / League Prize",
-        value="Guild League",
-    ),
-    discord.app_commands.Choice(
-        name="Emperium Overrun",
-        value="Emperium Overrun",
-    ),
-    discord.app_commands.Choice(
-        name="Designed Auction",
-        value="Designed Auction",
-    ),
-    discord.app_commands.Choice(name="All", value="All"),
-]
-
-REWARD_ORDER = (
-    "CARD",
-    "FEATHER_S",
-    "FEATHER_A",
-)
-
-REWARD_NAMES = {
-    "CARD": "🃏 Card",
-    "FEATHER_S": "🌗 Light-Dark",
-    "FEATHER_A": "⏳ Time-Space",
-}
 
 
 class Queue(commands.Cog):
@@ -67,8 +34,7 @@ class Queue(commands.Cog):
 
         pages = {}
         for index in range(start_index, start_index + amount):
-            page = index // 4 + 1
-            slot = index % 4 + 1
+            page, slot = position(index)
             pages.setdefault(page, []).append(slot)
 
         result = []
@@ -87,7 +53,7 @@ class Queue(commands.Cog):
 
     def build_queue_value(self, reward_groups):
         value_lines = []
-        for reward in REWARD_ORDER:
+        for reward in REWARD_TYPES:
             rows = reward_groups.get(reward)
             if not rows:
                 continue
@@ -139,7 +105,7 @@ class Queue(commands.Cog):
 
             category_lines = []
 
-            for reward in REWARD_ORDER:
+            for reward in REWARD_TYPES:
                 row = rewards.get(reward)
                 if row is None:
                     continue

@@ -1,3 +1,14 @@
+"""
+Simulate /generate without Discord.
+
+Run from the repo root:  python -m scripts.simulate_generation
+Uses a temporary database, so data/auction.db is never touched.
+"""
+import tempfile
+from pathlib import Path
+
+import database
+from constants import CATEGORIES, position
 from database import (
     init_database,
     set_reward_limit,
@@ -6,7 +17,7 @@ from database import (
     get_rewards,
     get_assigned_count,
 )
-from generator import generate_queues
+from generator import check_categories, generate_all
 
 
 def print_queues(guild_id):
@@ -61,11 +72,13 @@ def print_extra(guild_id):
                 continue
             assigned = get_assigned_count(guild_id, cat, reward)
             extra = max(row['stock'] - assigned, 0)
-            # explicit positions
+            # Time-Space positions start after all Light-Dark stock (same as /extra).
+            start = assigned
+            if reward == 'FEATHER_A' and 'FEATHER_S' in rewards:
+                start += rewards['FEATHER_S']['stock']
             positions = []
-            for index in range(assigned, assigned + extra):
-                page = index // 4 + 1
-                slot = index % 4 + 1
+            for index in range(start, start + extra):
+                page, slot = position(index)
                 positions.append(f"Page {page} : Slot {slot}")
             if positions:
                 print(f"- {reward}: Stock={row['stock']} In queues={assigned} Extra={extra} Positions:")
@@ -76,6 +89,7 @@ def print_extra(guild_id):
 
 
 if __name__ == '__main__':
+    database.DB_PATH = Path(tempfile.mkdtemp()) / 'simulate.db'
     init_database()
     GUILD = 'SIM_GUILD'
 
@@ -97,12 +111,18 @@ if __name__ == '__main__':
     set_reward_stock(GUILD, 'FEATHER_S', 42, 'League Prize')
     set_reward_stock(GUILD, 'FEATHER_A', 52, 'League Prize')
 
-    result = generate_queues(GUILD, 'All')
+    category_rewards, skipped = check_categories(GUILD, list(CATEGORIES))
+    summary = generate_all(GUILD, category_rewards)
     print('\n/generate (response)')
     print('✅ Queue Generated')
-    print('\nTotal queues per category:')
-    for k, v in result.items():
-        print(f'- {k}: {v}')
+    print('\nQueues per category:')
+    for k, v in summary['results'].items():
+        print(f"- {k}: {v['count']} (Queue {v['start']}-{v['end']})")
+    if summary['extra_count']:
+        print(f"- GL/LP Extra: {summary['extra_count']} (Queue {summary['extra_start']}-{summary['extra_end']})")
+    print(f"Remaining GL/LP Extra: {summary['remaining_extra']}")
+    for cat, reason in skipped:
+        print(f'Skipped {cat}: {reason}')
 
     # print sample queues 1,10,11,15 if they exist
     print_queues(GUILD)

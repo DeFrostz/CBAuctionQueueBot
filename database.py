@@ -1,16 +1,11 @@
 import sqlite3
 from pathlib import Path
 
+from constants import CATEGORIES
+
 
 DB_PATH = Path("data/auction.db")
 
-# Fixed categories
-CATEGORIES = [
-    "Guild League",
-    "League Prize",
-    "Emperium Overrun",
-    "Designed Auction",
-]
 
 
 def get_connection():

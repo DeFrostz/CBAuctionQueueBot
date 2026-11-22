@@ -4,18 +4,17 @@ from discord.ext import commands
 
 import asyncio
 
+from choices import CATEGORY_CHOICES
+from constants import CATEGORIES, LINKED, REWARD_NAMES, REWARD_TYPES
 from database import (
     set_reward_stock,
     set_reward_limit,
     get_rewards,
     clear_queue,
     clear_rewards,
-    CATEGORIES,
 )
 
-from generator import generate_queue, build_extra_pool, generate_extra_queues
-
-LINKED = ("Guild League", "League Prize")
+from generator import check_categories, generate_all
 
 # Stock can still be configured separately per category.
 SET_CATEGORY_CHOICES = [
@@ -23,35 +22,9 @@ SET_CATEGORY_CHOICES = [
     for cat in (*CATEGORIES, "All")
 ]
 
-# Commands that treat Guild League + League Prize as one linked group.
-LINKED_CATEGORY_CHOICES = [
-    discord.app_commands.Choice(
-        name="Guild League / League Prize",
-        value="Guild League",
-    ),
-    discord.app_commands.Choice(
-        name="Emperium Overrun",
-        value="Emperium Overrun",
-    ),
-    discord.app_commands.Choice(
-        name="Designed Auction",
-        value="Designed Auction",
-    ),
-    discord.app_commands.Choice(name="All", value="All"),
-]
-
-
 class Admin(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
-    @staticmethod
-    def reward_name(reward):
-        return {
-            "CARD": "Card",
-            "FEATHER_S": "Light-Dark",
-            "FEATHER_A": "Time-Space",
-        }.get(reward, reward)
 
     @discord.app_commands.command(
         name="setallstock", description="Set stock for all three rewards at once"
@@ -59,7 +32,7 @@ class Admin(commands.Cog):
     @discord.app_commands.choices(category=SET_CATEGORY_CHOICES)
     @discord.app_commands.describe(
         card="Total Card stock", light_dark="Total Light-Dark stock",
-        time_space="Total Time-Space stock", category="Which category to apply (Guild League default)",
+        time_space="Total Time-Space stock", category="Which category to apply (All by default)",
     )
     async def setallstock(self, interaction: discord.Interaction, card: int, light_dark: int, time_space: int, category: discord.app_commands.Choice[str] | None = None):
         if interaction.guild is None:
@@ -81,7 +54,7 @@ class Admin(commands.Cog):
         )
 
     @discord.app_commands.command(name="setalllimit", description="Set limits for all three rewards at once")
-    @discord.app_commands.choices(category=LINKED_CATEGORY_CHOICES)
+    @discord.app_commands.choices(category=CATEGORY_CHOICES)
     @discord.app_commands.describe(
         card="Card amount per queue (0 = Extra only)",
         light_dark="Light-Dark amount per queue (0 = Extra only)",
@@ -113,7 +86,7 @@ class Admin(commands.Cog):
         )
 
     @discord.app_commands.command(name="checkconfig", description="View current reward stock and queue limits")
-    @discord.app_commands.choices(category=LINKED_CATEGORY_CHOICES)
+    @discord.app_commands.choices(category=CATEGORY_CHOICES)
     @discord.app_commands.describe(category="Which category to check (All by default)")
     async def checkconfig(self, interaction: discord.Interaction, category: discord.app_commands.Choice[str] | None = None):
         if interaction.guild is None:
@@ -129,13 +102,6 @@ class Admin(commands.Cog):
             targets = list(LINKED)
         else:
             targets = [category_value]
-
-        reward_order = ("CARD", "FEATHER_S", "FEATHER_A")
-        reward_names = {
-            "CARD": "🃏 Card",
-            "FEATHER_S": "🌗 Light-Dark",
-            "FEATHER_A": "⏳ Time-Space",
-        }
 
         embed = discord.Embed(
             title="⚙️ Auction Configuration",
@@ -158,19 +124,19 @@ class Admin(commands.Cog):
 
             lines = []
 
-            for reward in reward_order:
+            for reward in REWARD_TYPES:
                 row = rewards.get(reward)
 
                 if row is None:
                     lines.append(
-                        f"{reward_names[reward]}\n"
+                        f"{REWARD_NAMES[reward]}\n"
                         "Stock: Not configured\n"
                         "Limit / Queue: Not configured"
                     )
                     continue
 
                 lines.append(
-                    f"{reward_names[reward]}\n"
+                    f"{REWARD_NAMES[reward]}\n"
                     f"Stock: **{row['stock']}**\n"
                     f"Limit / Queue: **{row['limit_per_queue']}**"
                 )
@@ -187,14 +153,11 @@ class Admin(commands.Cog):
         )
 
     @discord.app_commands.command(name="clearqueues", description="Clear generated auction queues")
-    @discord.app_commands.choices(category=LINKED_CATEGORY_CHOICES)
+    @discord.app_commands.choices(category=CATEGORY_CHOICES)
     @discord.app_commands.describe(category="Which category to clear, or All")
     async def clearqueues(self, interaction: discord.Interaction, category: discord.app_commands.Choice[str] | None = None):
         if interaction.guild is None:
             await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
-            return
-        if not (interaction.user.guild_permissions.administrator or await self.bot.is_owner(interaction.user)):
-            await interaction.response.send_message("❌ You need Administrator permission to use this command.", ephemeral=True)
             return
         guild_id = str(interaction.guild.id)
         category_value = category.value if category is not None else "All"
@@ -209,7 +172,7 @@ class Admin(commands.Cog):
         await interaction.response.send_message(f"🗑️ Cleared queues for {message}.")
 
     @discord.app_commands.command(name="generate", description="Generate auction queue")
-    @discord.app_commands.choices(category=LINKED_CATEGORY_CHOICES)
+    @discord.app_commands.choices(category=CATEGORY_CHOICES)
     async def generate(self, interaction: discord.Interaction, category: discord.app_commands.Choice[str] | None = None):
         if interaction.guild is None:
             await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
@@ -219,29 +182,8 @@ class Admin(commands.Cog):
         if category_value == "All": to_generate = list(CATEGORIES)
         elif category_value in LINKED: to_generate = list(LINKED)
         else: to_generate = [category_value]
-        required = ("CARD", "FEATHER_S", "FEATHER_A")
-        valid_categories, skipped_categories = [], []
-        for cat in to_generate:
-            rows = get_rewards(guild_id, cat)
-            reward_map = {row["reward_type"]: row for row in rows}
-            if any(reward not in reward_map for reward in required):
-                skipped_categories.append((cat, "missing reward config")); continue
-            if any(int(reward_map[reward]["limit_per_queue"]) < 0 for reward in required):
-                skipped_categories.append((cat, "invalid negative limit")); continue
-
-            active_rewards = [
-                reward for reward in required
-                if int(reward_map[reward]["limit_per_queue"]) > 0
-            ]
-
-            if not active_rewards:
-                skipped_categories.append((cat, "all limits are 0")); continue
-
-            if any(int(reward_map[reward]["stock"]) < 1 for reward in active_rewards):
-                skipped_categories.append((cat, "missing stock for active reward")); continue
-
-            valid_categories.append(cat)
-        if not valid_categories:
+        category_rewards, skipped_categories = check_categories(guild_id, to_generate)
+        if not category_rewards:
             lines = ["❌ No categories are ready to generate."]
             if skipped_categories:
                 lines.extend(["", "Skipped:"])
@@ -250,33 +192,10 @@ class Admin(commands.Cog):
             return
         await interaction.response.defer(thinking=True)
         try:
-            for cat in valid_categories: clear_queue(guild_id, cat)
-            results, category_rewards, normal_queue_counts = {}, {}, {}
-            linked_next_queue_no = 1
-            for cat in valid_categories:
-                rows = get_rewards(guild_id, cat); category_rewards[cat] = rows
-                if cat in LINKED:
-                    start_no = linked_next_queue_no
-                    count = await asyncio.to_thread(generate_queue, guild_id, rows, start_no)
-                    linked_next_queue_no += count
-                else:
-                    start_no = 1
-                    count = await asyncio.to_thread(generate_queue, guild_id, rows, start_no)
-                normal_queue_counts[cat] = count
-                results[cat] = {"count": count, "start": start_no, "end": (start_no + count - 1 if count > 0 else 0)}
-            extra_count, remaining_extra, extra_start = 0, None, None
-            if all(cat in category_rewards for cat in LINKED):
-                extra_pool = build_extra_pool(
-                    {cat: category_rewards[cat] for cat in LINKED},
-                    {cat: normal_queue_counts[cat] for cat in LINKED},
-                )
-                linked_reward_map = {row["reward_type"]: row for row in category_rewards[LINKED[0]]}
-                limits = {reward: linked_reward_map[reward]["limit_per_queue"] for reward in required}
-                extra_start = linked_next_queue_no
-                extra_count, remaining_extra = await asyncio.to_thread(
-                    generate_extra_queues, guild_id, extra_pool, limits, linked_next_queue_no
-                )
-                linked_next_queue_no += extra_count
+            summary = await asyncio.to_thread(generate_all, guild_id, category_rewards)
+            results = summary["results"]
+            extra_count = summary["extra_count"]
+            remaining_extra = summary["remaining_extra"]
             lines = ["✅ Queue Generated", ""]
             if any(cat in results for cat in LINKED):
                 lines.append("🏆 Guild League / League Prize")
@@ -285,12 +204,17 @@ class Admin(commands.Cog):
                     data = results[cat]
                     if data["count"] > 0:
                         lines.append(f"- {cat}: {data['count']} (Queue {data['start']}-{data['end']})")
+                if extra_count > 0:
+                    lines.append(f"- GL/LP Extra: {extra_count} (Queue {summary['extra_start']}-{summary['extra_end']})")
+                if summary["linked_limits_differ"]:
+                    lines.append(
+                        f"⚠️ Guild League and League Prize limits differ. Extra used the "
+                        f"{summary['extra_limits_from']} limits. Run /setalllimit to sync them."
+                    )
             for cat in ("Emperium Overrun", "Designed Auction"):
                 if cat not in results: continue
                 data = results[cat]; lines.extend(["", f"📂 {cat}"])
                 lines.append(f"- {data['count']} (Queue {data['start']}-{data['end']})" if data["count"] > 0 else "- 0")
-            if extra_count > 0:
-                lines.append(f"- GL/LP Extra: {extra_count} (Queue {extra_start}-{linked_next_queue_no - 1})")
             if skipped_categories:
                 lines.extend(["", "Skipped:"])
                 for cat, reason in skipped_categories: lines.append(f"- {cat}: {reason}")
@@ -305,7 +229,7 @@ class Admin(commands.Cog):
             await interaction.followup.send(f"❌ Failed to generate queue: {e}", ephemeral=True)
 
     @discord.app_commands.command(name="clearconfig", description="Clear stock, limits and generated queues")
-    @discord.app_commands.choices(category=LINKED_CATEGORY_CHOICES)
+    @discord.app_commands.choices(category=CATEGORY_CHOICES)
     async def clearconfig(self, interaction: discord.Interaction, category: discord.app_commands.Choice[str] | None = None):
         if interaction.guild is None:
             await interaction.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
