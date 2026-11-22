@@ -1166,9 +1166,9 @@ def rank_detail_lines(area, rank_name):
 
     left = outcome["feather_left"]
     if left["FEATHER_S"] or left["FEATHER_A"]:
-        lines.append(f"ขนเหลือ (Extra ไม่แจก): ขาวดำ {left['FEATHER_S']} / แดงดำ {left['FEATHER_A']}")
+        lines.append(f"ขนนกเหลือ (Extra ไม่แจก): ขาวดำ {left['FEATHER_S']} / แดงดำ {left['FEATHER_A']}")
     else:
-        lines.append("ขนเหลือ: ไม่มี")
+        lines.append("ขนนกเหลือ: ไม่มี")
 
     if area == "gl":
         lines.append("แพ้ => ของ League Prize ลดลง ผลจะต่างจากนี้")
