@@ -16,10 +16,11 @@ from database import (
     get_party_plan,
     set_day_closed,
     set_party_plan,
+    set_used_queue_start,
 )
 
 from generator import check_categories, generate_all
-from parties import assign_cards, card_summary_lines, end_day
+from parties import assign_cards, card_summary_lines, end_day, preview_party_plan
 
 # Stock can still be configured separately per category.
 SET_CATEGORY_CHOICES = [
@@ -226,6 +227,55 @@ class Admin(commands.Cog):
             ])
         )
 
+    @discord.app_commands.command(
+        name="partyplan",
+        description="Quick calculation of the queue - party table and Cards (saves nothing)",
+    )
+    @discord.app_commands.choices(
+        view=[
+            discord.app_commands.Choice(name="Both", value="both"),
+            discord.app_commands.Choice(name="Queue - party table", value="queue"),
+            discord.app_commands.Choice(name="Card per party", value="card"),
+        ]
+    )
+    @discord.app_commands.describe(
+        date="Heading date, example 19/11",
+        view="What to show (Both by default)",
+    )
+    async def partyplan(
+        self,
+        interaction: discord.Interaction,
+        date: str,
+        view: discord.app_commands.Choice[str] | None = None,
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
+            return
+        guild_id = str(interaction.guild.id)
+        plan = get_party_plan(guild_id)
+        if plan is None:
+            await interaction.response.send_message("❌ No party plan yet. Use /setparty first.", ephemeral=True)
+            return
+        date = date.strip()
+        # The plan is always posted as the "Win" case.
+        header = f"{date} condition Win"
+        result = preview_party_plan(
+            guild_id, plan, view.value if view is not None else "both", header
+        )
+        if "error" in result:
+            lines = ["❌ Nothing to calculate yet. Set stock and limits for Guild League / League Prize first."]
+            if result["notes"]:
+                lines.extend(["", "Skipped:"])
+                lines.extend(f"- {note}" for note in result["notes"])
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            return
+        messages = result["messages"]
+        await interaction.response.send_message(messages[0])
+        for message in messages[1:]:
+            await interaction.followup.send(message)
+        # Remarks are only for the person who ran the command.
+        await interaction.followup.send("\n".join(f"ℹ️ {note}" for note in result["notes"]), ephemeral=True)
+
     @discord.app_commands.command(name="checkconfig", description="View current reward stock and queue limits")
     @discord.app_commands.choices(category=CATEGORY_CHOICES)
     @discord.app_commands.describe(category="Which category to check (All by default)")
@@ -357,6 +407,8 @@ class Admin(commands.Cog):
             plan = get_party_plan(guild_id)
             if linked_done and plan is not None:
                 set_day_closed(guild_id, False)
+                set_used_queue_start(guild_id, plan["queue_start"])
+                plan = get_party_plan(guild_id)
                 card_result = await asyncio.to_thread(assign_cards, guild_id, plan, linked_done)
                 if remaining_extra is not None:
                     placed = sum(info["count"] for info in card_result["per_category"].values())

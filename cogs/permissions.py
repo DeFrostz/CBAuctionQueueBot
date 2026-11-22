@@ -15,6 +15,7 @@ ADMIN_ONLY_COMMANDS = {
     "queuepanel",
     "setparty",
     "endday",
+    "partyplan",
 }
 
 

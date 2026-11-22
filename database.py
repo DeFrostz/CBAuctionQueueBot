@@ -130,9 +130,17 @@ def init_database():
         queue_start INTEGER NOT NULL,
         card_start INTEGER NOT NULL,
         day_closed INTEGER NOT NULL DEFAULT 0,
-        last_card_party INTEGER
+        last_card_party INTEGER,
+        used_queue_start INTEGER
     )
     """)
+
+    # Migration: party_plan was created without used_queue_start.
+    party_cols = [
+        r[1] for r in cursor.execute("PRAGMA table_info(party_plan)").fetchall()
+    ]
+    if "used_queue_start" not in party_cols:
+        cursor.execute("ALTER TABLE party_plan ADD COLUMN used_queue_start INTEGER")
 
     conn.commit()
     conn.close()
@@ -398,7 +406,8 @@ def set_party_plan(guild_id, party_count, queue_start, card_start):
         queue_start=excluded.queue_start,
         card_start=excluded.card_start,
         day_closed=0,
-        last_card_party=NULL
+        last_card_party=NULL,
+        used_queue_start=NULL
     """,
         (guild_id, party_count, queue_start, card_start),
     )
@@ -450,6 +459,17 @@ def set_last_card_party(guild_id, party):
     conn.execute(
         "UPDATE party_plan SET last_card_party=? WHERE guild_id=?",
         (party, guild_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_used_queue_start(guild_id, queue_start):
+    """Remember which party queue 1 had when the queues were generated."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE party_plan SET used_queue_start=? WHERE guild_id=?",
+        (queue_start, guild_id),
     )
     conn.commit()
     conn.close()

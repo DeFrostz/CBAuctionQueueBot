@@ -120,6 +120,23 @@ def build_extra_pool(category_rewards, normal_queue_counts):
     return pool
 
 
+def count_extra_queues(extra_pool, limits):
+    """How many complete Extra queues the pool can make (nothing is saved)."""
+    active_rewards = [
+        reward
+        for reward in REWARD_TYPES
+        if int(limits.get(reward, 0)) > 0
+    ]
+
+    if not active_rewards:
+        return 0
+
+    return min(
+        len(extra_pool[reward]) // int(limits[reward])
+        for reward in active_rewards
+    )
+
+
 def generate_extra_queues(guild_id, extra_pool, limits, start_no):
     """
     Combine Extra from linked categories into complete queues.
@@ -141,10 +158,7 @@ def generate_extra_queues(guild_id, extra_pool, limits, start_no):
         }
         return 0, remaining
 
-    extra_queue_count = min(
-        len(extra_pool[reward]) // int(limits[reward])
-        for reward in active_rewards
-    )
+    extra_queue_count = count_extra_queues(extra_pool, limits)
 
     positions = []
     pointers = {reward: 0 for reward in REWARD_TYPES}
