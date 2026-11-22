@@ -5,7 +5,7 @@ from discord.ext import commands
 import asyncio
 
 from choices import CATEGORY_CHOICES
-from constants import CATEGORIES, LINKED, REWARD_NAMES, REWARD_TYPES
+from constants import CATEGORIES, LINKED, REQUIRED_REWARDS, REWARD_NAMES, REWARD_TYPES
 from database import (
     set_reward_stock,
     set_reward_limit,
@@ -27,18 +27,44 @@ class Admin(commands.Cog):
         self.bot = bot
 
     @discord.app_commands.command(
-        name="setallstock", description="Set stock for all three rewards at once"
+        name="setallstock", description="Set stock for all rewards at once"
     )
     @discord.app_commands.choices(category=SET_CATEGORY_CHOICES)
     @discord.app_commands.describe(
         card="Total Card stock", light_dark="Total Light-Dark stock",
-        time_space="Total Time-Space stock", category="Which category to apply (All by default)",
+        time_space="Total Time-Space stock",
+        destroyer_stardust="Total Destroyer Stardust Pack stock (leave empty to keep current)",
+        destroyer_starcore="Total Destroyer Starcore stock (leave empty to keep current)",
+        guardian_stardust="Total Guardian Stardust Pack stock (leave empty to keep current)",
+        guardian_starcore="Total Guardian Starcore stock (leave empty to keep current)",
+        category="Which category to apply (All by default)",
     )
-    async def setallstock(self, interaction: discord.Interaction, card: int, light_dark: int, time_space: int, category: discord.app_commands.Choice[str] | None = None):
+    async def setallstock(
+        self,
+        interaction: discord.Interaction,
+        card: int,
+        light_dark: int,
+        time_space: int,
+        destroyer_stardust: int | None = None,
+        destroyer_starcore: int | None = None,
+        guardian_stardust: int | None = None,
+        guardian_starcore: int | None = None,
+        category: discord.app_commands.Choice[str] | None = None,
+    ):
         if interaction.guild is None:
             await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
             return
-        stock_values = {"CARD": card, "FEATHER_S": light_dark, "FEATHER_A": time_space}
+        stock_values = {
+            "CARD": card,
+            "FEATHER_S": light_dark,
+            "FEATHER_A": time_space,
+            "ASTRO_DS": destroyer_stardust,
+            "ASTRO_DC": destroyer_starcore,
+            "ASTRO_GS": guardian_stardust,
+            "ASTRO_GC": guardian_starcore,
+        }
+        # Optional rewards that were left empty are not touched.
+        stock_values = {r: v for r, v in stock_values.items() if v is not None}
         if any(stock < 0 for stock in stock_values.values()):
             await interaction.response.send_message("❌ Stock must be 0 or greater for all rewards", ephemeral=True)
             return
@@ -48,24 +74,49 @@ class Admin(commands.Cog):
         for target in targets:
             for reward, stock in stock_values.items():
                 set_reward_stock(guild_id, reward, stock, target)
-        await interaction.response.send_message(
-            "✅ All reward stock updated\n" f"🃏 Card: {card}\n" f"🌗 Light-Dark: {light_dark}\n"
-            f"⏳ Time-Space: {time_space}\n" f"Applied to: {', '.join(targets)}"
-        )
+        lines = ["✅ Reward stock updated"]
+        lines.extend(f"{REWARD_NAMES[reward]}: {stock_values[reward]}" for reward in REWARD_TYPES if reward in stock_values)
+        lines.append(f"Applied to: {', '.join(targets)}")
+        await interaction.response.send_message("\n".join(lines))
 
-    @discord.app_commands.command(name="setalllimit", description="Set limits for all three rewards at once")
+    @discord.app_commands.command(name="setalllimit", description="Set limits for all rewards at once")
     @discord.app_commands.choices(category=CATEGORY_CHOICES)
     @discord.app_commands.describe(
         card="Card amount per queue (0 = Extra only)",
         light_dark="Light-Dark amount per queue (0 = Extra only)",
         time_space="Time-Space amount per queue (0 = Extra only)",
+        destroyer_stardust="Destroyer Stardust Pack per queue (0 = Extra only, empty = keep current)",
+        destroyer_starcore="Destroyer Starcore per queue (0 = Extra only, empty = keep current)",
+        guardian_stardust="Guardian Stardust Pack per queue (0 = Extra only, empty = keep current)",
+        guardian_starcore="Guardian Starcore per queue (0 = Extra only, empty = keep current)",
         category="Which category to apply. Guild League / League Prize are linked.",
     )
-    async def setalllimit(self, interaction: discord.Interaction, card: int, light_dark: int, time_space: int, category: discord.app_commands.Choice[str] | None = None):
+    async def setalllimit(
+        self,
+        interaction: discord.Interaction,
+        card: int,
+        light_dark: int,
+        time_space: int,
+        destroyer_stardust: int | None = None,
+        destroyer_starcore: int | None = None,
+        guardian_stardust: int | None = None,
+        guardian_starcore: int | None = None,
+        category: discord.app_commands.Choice[str] | None = None,
+    ):
         if interaction.guild is None:
             await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
             return
-        limit_values = {"CARD": card, "FEATHER_S": light_dark, "FEATHER_A": time_space}
+        limit_values = {
+            "CARD": card,
+            "FEATHER_S": light_dark,
+            "FEATHER_A": time_space,
+            "ASTRO_DS": destroyer_stardust,
+            "ASTRO_DC": destroyer_starcore,
+            "ASTRO_GS": guardian_stardust,
+            "ASTRO_GC": guardian_starcore,
+        }
+        # Optional rewards that were left empty are not touched.
+        limit_values = {r: v for r, v in limit_values.items() if v is not None}
         if any(limit < 0 for limit in limit_values.values()):
             await interaction.response.send_message("❌ Every limit must be 0 or greater", ephemeral=True)
             return
@@ -80,10 +131,10 @@ class Admin(commands.Cog):
         for target in targets:
             for reward, limit in limit_values.items():
                 set_reward_limit(guild_id, reward, limit, target)
-        await interaction.response.send_message(
-            "✅ All queue limits updated\n" f"🃏 Card: {card}\n" f"🌗 Light-Dark: {light_dark}\n"
-            f"⏳ Time-Space: {time_space}\n" f"Applied to: {', '.join(targets)}"
-        )
+        lines = ["✅ Queue limits updated"]
+        lines.extend(f"{REWARD_NAMES[reward]}: {limit_values[reward]}" for reward in REWARD_TYPES if reward in limit_values)
+        lines.append(f"Applied to: {', '.join(targets)}")
+        await interaction.response.send_message("\n".join(lines))
 
     @discord.app_commands.command(name="checkconfig", description="View current reward stock and queue limits")
     @discord.app_commands.choices(category=CATEGORY_CHOICES)
@@ -128,6 +179,8 @@ class Admin(commands.Cog):
                 row = rewards.get(reward)
 
                 if row is None:
+                    if reward not in REQUIRED_REWARDS:
+                        continue
                     lines.append(
                         f"{REWARD_NAMES[reward]}\n"
                         "Stock: Not configured\n"
@@ -219,8 +272,12 @@ class Admin(commands.Cog):
                 lines.extend(["", "Skipped:"])
                 for cat, reason in skipped_categories: lines.append(f"- {cat}: {reason}")
             if remaining_extra is not None:
-                lines.extend(["", "Remaining GL/LP Extra:", f"- Card: {remaining_extra['CARD']}",
-                              f"- Light-Dark: {remaining_extra['FEATHER_S']}", f"- Time-Space: {remaining_extra['FEATHER_A']}"])
+                lines.extend(["", "Remaining GL/LP Extra:"])
+                lines.extend(
+                    f"- {REWARD_NAMES[reward]}: {remaining_extra[reward]}"
+                    for reward in REWARD_TYPES
+                    if remaining_extra[reward] > 0 or reward in REQUIRED_REWARDS
+                )
             total_generated = sum(data["count"] for data in results.values()) + extra_count
             lines.extend(["", f"Total generated queues: {total_generated}", "", "Use: /queuelist"])
             await interaction.followup.send("\n".join(lines))

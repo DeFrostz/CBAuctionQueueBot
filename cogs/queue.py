@@ -3,7 +3,14 @@ import discord
 from discord.ext import commands
 
 from choices import CATEGORY_CHOICES
-from constants import CATEGORIES, LINKED, REWARD_NAMES, REWARD_TYPES, position
+from constants import (
+    CATEGORIES,
+    LINKED,
+    REWARD_NAMES,
+    REWARD_TYPES,
+    list_offset,
+    position,
+)
 from database import (
     get_all_queue,
     get_queue,
@@ -104,6 +111,7 @@ class Queue(commands.Cog):
                 continue
 
             category_lines = []
+            stocks = {name: int(row["stock"]) for name, row in rewards.items()}
 
             for reward in REWARD_TYPES:
                 row = rewards.get(reward)
@@ -121,12 +129,9 @@ class Queue(commands.Cog):
                 if remaining <= 0:
                     continue
 
-                start_index = assigned
-
-                if reward == "FEATHER_A":
-                    feather_s = rewards.get("FEATHER_S")
-                    feather_s_stock = int(feather_s["stock"]) if feather_s else 0
-                    start_index = feather_s_stock + assigned
+                # Rewards that share a tab start after the stock of the ones
+                # listed before them (e.g. Time-Space after Light-Dark).
+                start_index = list_offset(reward, stocks) + assigned
 
                 positions = self.group_position_range(
                     start_index,
@@ -143,11 +148,32 @@ class Queue(commands.Cog):
                 continue
 
             has_remaining = True
-            embed.add_field(
-                name=f"📂 {category_name}",
-                value="\n\n".join(category_lines),
-                inline=False,
-            )
+
+            # A Discord field holds at most 1024 characters, so split the
+            # reward blocks over several fields when a category has many.
+            chunks = []
+            current = ""
+            for block in category_lines:
+                block = block[:1000]
+                candidate = f"{current}\n\n{block}" if current else block
+                if len(candidate) > 1000 and current:
+                    chunks.append(current)
+                    current = block
+                else:
+                    current = candidate
+            if current:
+                chunks.append(current)
+
+            for index, chunk in enumerate(chunks):
+                embed.add_field(
+                    name=(
+                        f"📂 {category_name}"
+                        if index == 0
+                        else f"↳ {category_name} (continued)"
+                    ),
+                    value=chunk,
+                    inline=False,
+                )
 
         if not has_remaining:
             await interaction.response.send_message(

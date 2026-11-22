@@ -1,6 +1,35 @@
-from constants import LINKED, REWARD_TYPES, position
+from constants import (
+    LINKED,
+    REQUIRED_REWARDS,
+    REWARD_TYPES,
+    list_offset,
+    position,
+)
 from database import clear_queue, get_rewards, save_queue_positions_bulk
 
+
+def reward_values(rewards):
+    """
+    Return ({reward: stock}, {reward: limit}) for every reward type.
+
+    A reward with no row (optional rewards that were never set) counts as
+    stock 0 / limit 0.
+    """
+    reward_map = {row["reward_type"]: row for row in rewards}
+    stocks = {}
+    limits = {}
+
+    for reward in REWARD_TYPES:
+        row = reward_map.get(reward)
+        stocks[reward] = int(row["stock"]) if row is not None else 0
+        limits[reward] = int(row["limit_per_queue"]) if row is not None else 0
+
+    return stocks, limits
+
+
+def has_required_rewards(rewards):
+    reward_map = {row["reward_type"] for row in rewards}
+    return all(reward in reward_map for reward in REQUIRED_REWARDS)
 
 
 def get_queue_count_from_rewards(rewards):
@@ -12,24 +41,16 @@ def get_queue_count_from_rewards(rewards):
     - none of its stock is assigned to normal queues
     - all of its stock remains Extra
     """
-    if not rewards:
+    if not rewards or not has_required_rewards(rewards):
         return 0
 
-    reward_map = {row["reward_type"]: row for row in rewards}
+    stocks, limits = reward_values(rewards)
 
-    if any(reward not in reward_map for reward in REWARD_TYPES):
-        return 0
-
-    counts = []
-
-    for reward in REWARD_TYPES:
-        stock = int(reward_map[reward]["stock"])
-        limit = int(reward_map[reward]["limit_per_queue"])
-
-        if limit <= 0:
-            continue
-
-        counts.append(stock // limit)
+    counts = [
+        stocks[reward] // limits[reward]
+        for reward in REWARD_TYPES
+        if limits[reward] > 0
+    ]
 
     # All rewards disabled -> no queue can be generated.
     if not counts:
@@ -44,53 +65,29 @@ def generate_queue(guild_id, rewards, start_no=1):
 
     Rewards with limit = 0 are skipped and remain entirely as Extra.
     """
-    if not rewards:
+    if not rewards or not has_required_rewards(rewards):
         return 0
 
     category = rewards[0]["category"]
-    reward_map = {r["reward_type"]: r for r in rewards}
-
-    card = reward_map.get("CARD")
-    feather_s = reward_map.get("FEATHER_S")
-    feather_a = reward_map.get("FEATHER_A")
-
-    if not card or not feather_s or not feather_a:
-        return 0
-
+    stocks, limits = reward_values(rewards)
     queue_count = get_queue_count_from_rewards(rewards)
 
+    # Next unused index of each reward inside its tab. Rewards that share a
+    # tab (Light-Dark / Time-Space, the Astrocore kinds) start after the
+    # stock of the ones listed before them.
+    pointers = {reward: list_offset(reward, stocks) for reward in REWARD_TYPES}
+
     positions = []
-
-    card_index = 0
-    s_index = 0
-
-    # A is displayed after all S stock in the Feather filter.
-    a_index = int(feather_s["stock"])
-
-    card_limit = int(card["limit_per_queue"])
-    s_limit = int(feather_s["limit_per_queue"])
-    a_limit = int(feather_a["limit_per_queue"])
 
     for i in range(queue_count):
         queue_no = start_no + i
 
-        # CARD - range(0) means the entire Card stock stays Extra.
-        for _ in range(card_limit):
-            page, slot = position(card_index)
-            positions.append((guild_id, category, queue_no, "CARD", page, slot))
-            card_index += 1
-
-        # FEATHER S
-        for _ in range(s_limit):
-            page, slot = position(s_index)
-            positions.append((guild_id, category, queue_no, "FEATHER_S", page, slot))
-            s_index += 1
-
-        # FEATHER A
-        for _ in range(a_limit):
-            page, slot = position(a_index)
-            positions.append((guild_id, category, queue_no, "FEATHER_A", page, slot))
-            a_index += 1
+        # limit 0 -> range(0): the entire stock stays Extra.
+        for reward in REWARD_TYPES:
+            for _ in range(limits[reward]):
+                page, slot = position(pointers[reward])
+                positions.append((guild_id, category, queue_no, reward, page, slot))
+                pointers[reward] += 1
 
     save_queue_positions_bulk(positions)
 
@@ -104,54 +101,21 @@ def build_extra_pool(category_rewards, normal_queue_counts):
     A reward whose limit is 0 has used count = 0, so its entire stock
     automatically becomes part of the Extra pool.
     """
-    pool = {"CARD": [], "FEATHER_S": [], "FEATHER_A": []}
+    pool = {reward: [] for reward in REWARD_TYPES}
 
     for category, rewards in category_rewards.items():
-        reward_map = {row["reward_type"]: row for row in rewards}
+        stocks, limits = reward_values(rewards)
         queue_count = normal_queue_counts.get(category, 0)
 
-        card = reward_map["CARD"]
-        feather_s = reward_map["FEATHER_S"]
-        feather_a = reward_map["FEATHER_A"]
+        for reward in REWARD_TYPES:
+            offset = list_offset(reward, stocks)
+            used = queue_count * limits[reward]
 
-        card_stock = int(card["stock"])
-        s_stock = int(feather_s["stock"])
-        a_stock = int(feather_a["stock"])
-
-        card_limit = int(card["limit_per_queue"])
-        s_limit = int(feather_s["limit_per_queue"])
-        a_limit = int(feather_a["limit_per_queue"])
-
-        # -------------------------
-        # Card Extra
-        # -------------------------
-        card_used = queue_count * card_limit
-
-        for index in range(card_used, card_stock):
-            page, slot = position(index)
-            pool["CARD"].append({"category": category, "page": page, "slot": slot})
-
-        # -------------------------
-        # Feather S Extra
-        # -------------------------
-        s_used = queue_count * s_limit
-
-        for index in range(s_used, s_stock):
-            page, slot = position(index)
-            pool["FEATHER_S"].append({"category": category, "page": page, "slot": slot})
-
-        # -------------------------
-        # Feather A Extra
-        # -------------------------
-        a_used = queue_count * a_limit
-
-        # A starts after all S stock of that category.
-        a_start = s_stock + a_used
-        a_end = s_stock + a_stock
-
-        for index in range(a_start, a_end):
-            page, slot = position(index)
-            pool["FEATHER_A"].append({"category": category, "page": page, "slot": slot})
+            for index in range(offset + used, offset + stocks[reward]):
+                page, slot = position(index)
+                pool[reward].append(
+                    {"category": category, "page": page, "slot": slot}
+                )
 
     return pool
 
@@ -183,7 +147,7 @@ def generate_extra_queues(guild_id, extra_pool, limits, start_no):
     )
 
     positions = []
-    pointers = {"CARD": 0, "FEATHER_S": 0, "FEATHER_A": 0}
+    pointers = {reward: 0 for reward in REWARD_TYPES}
 
     for i in range(extra_queue_count):
         queue_no = start_no + i
@@ -220,15 +184,10 @@ def generate_extra_queues(guild_id, extra_pool, limits, start_no):
 
 def get_skip_reason(rewards):
     """Return why a category cannot be generated, or None if it is ready."""
-    reward_map = {row["reward_type"]: row for row in rewards}
-
-    if any(reward not in reward_map for reward in REWARD_TYPES):
+    if not has_required_rewards(rewards):
         return "missing reward config"
 
-    limits = {
-        reward: int(reward_map[reward]["limit_per_queue"])
-        for reward in REWARD_TYPES
-    }
+    stocks, limits = reward_values(rewards)
 
     if any(limit < 0 for limit in limits.values()):
         return "invalid negative limit"
@@ -238,7 +197,7 @@ def get_skip_reason(rewards):
     if not active_rewards:
         return "all limits are 0"
 
-    if any(int(reward_map[reward]["stock"]) < 1 for reward in active_rewards):
+    if any(stocks[reward] < 1 for reward in active_rewards):
         return "missing stock for active reward"
 
     return None
@@ -320,14 +279,8 @@ def generate_all(guild_id, category_rewards):
         {cat: normal_queue_counts[cat] for cat in linked_ready},
     )
 
-    linked_limits = [
-        {
-            row["reward_type"]: int(row["limit_per_queue"])
-            for row in category_rewards[cat]
-        }
-        for cat in linked_ready
-    ]
-    limits = {reward: linked_limits[0][reward] for reward in REWARD_TYPES}
+    linked_limits = [reward_values(category_rewards[cat])[1] for cat in linked_ready]
+    limits = dict(linked_limits[0])
 
     extra_count, remaining_extra = generate_extra_queues(
         guild_id,
@@ -342,10 +295,7 @@ def generate_all(guild_id, category_rewards):
         extra_end=linked_next_queue_no + extra_count - 1,
         remaining_extra=remaining_extra,
         extra_limits_from=linked_ready[0],
-        linked_limits_differ=any(
-            {reward: other[reward] for reward in REWARD_TYPES} != limits
-            for other in linked_limits[1:]
-        ),
+        linked_limits_differ=any(other != limits for other in linked_limits[1:]),
     )
 
     return summary
