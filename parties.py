@@ -33,6 +33,7 @@ from constants import (
 )
 from database import (
     get_max_queue_no,
+    get_assigned_count,
     get_party_plan,
     get_rewards,
     save_queue_positions_bulk,
@@ -731,6 +732,124 @@ def emperium_summary_lines(outcome, count):
     return lines
 
 
+def _astro_extra_lines(items, legend=True):
+    """
+    Compact Astrocore extras: one line per party with the four kinds
+    ("p9 : GC 3-3 | DC 7-3 | GS 11-3 | DS 15-3", page-slot each).
+
+    items: {reward: [(page, slot, party)]}
+    """
+    kinds = list(SPREAD_GROUPS["astro"])
+    abbreviations = {reward: reward.split("_")[1] for reward in kinds}
+    lines = []
+    if legend:
+        lines.append(" / ".join(f"{abbreviations[r]} {kind_name(r)}" for r in kinds))
+
+    rows = max((len(items.get(r, [])) for r in kinds), default=0)
+    if rows == 0:
+        return lines
+
+    width = max(
+        len(f"p{party}")
+        for r in kinds
+        for _page, _slot, party in items.get(r, [])
+    )
+    for index in range(rows):
+        party = next(
+            items[r][index][2] for r in kinds if index < len(items.get(r, []))
+        )
+        cells = [
+            f"{abbreviations[r]} {items[r][index][0]}-{items[r][index][1]}"
+            if index < len(items.get(r, []))
+            else f"{abbreviations[r]} -"
+            for r in kinds
+        ]
+        lines.append(f"{f'p{party}'.ljust(width)} : " + " | ".join(cells))
+    return lines
+
+
+def emperium_extras(guild_id, plan):
+    """
+    Extra Card / Astrocore of the generated Emperium queues, with parties.
+
+    Rebuilt from what was saved: the items no queue holds are the extras, and
+    the party of the last extra (kept until the next /generate) tells where
+    the rotation started. Returns {reward: [(page, slot, party)]}, empty when
+    there are no extras.
+    """
+    if plan is None:
+        return {}
+    rows = get_rewards(guild_id, EMPERIUM_CATEGORY)
+    if not rows:
+        return {}
+
+    stocks, _limits = reward_values(rows)
+    count = plan["party_count"]
+    result = {}
+
+    for group, rewards in SPREAD_GROUPS.items():
+        last = plan["last_card_party"] if group == "card" else plan["last_astro_party"]
+        assigned = {
+            r: get_assigned_count(guild_id, EMPERIUM_CATEGORY, r) for r in rewards
+        }
+        extra = {r: max(stocks[r] - assigned[r], 0) for r in rewards}
+        biggest = max(extra.values())
+        if last is None or biggest == 0:
+            continue
+
+        start = (last - 1 - (biggest - 1)) % count + 1
+        for reward in rewards:
+            offset = list_offset(reward, stocks)
+            items = []
+            for k in range(extra[reward]):
+                page, slot = position(offset + assigned[reward] + k)
+                items.append((page, slot, (start - 1 + k) % count + 1))
+            if items:
+                result[reward] = items
+
+    return result
+
+
+def party_extra_lines(extras, party):
+    """Lines for the extras one party gets (empty when it gets none)."""
+    lines = []
+    for page, slot, owner in extras.get("CARD", []):
+        if owner == party:
+            lines.append(f"Card : Page {page} : Slot {slot}")
+
+    mine = {
+        reward: [item for item in extras.get(reward, []) if item[2] == party]
+        for reward in SPREAD_GROUPS["astro"]
+    }
+    for text in _astro_extra_lines(mine, legend=False):
+        lines.append("Astrocore : " + text.split(" : ", 1)[1])
+    return lines
+
+
+def extra_overview_lines(extras):
+    """Every extra by party, in the same format as the /emperiumplan note."""
+    lines = []
+
+    card = extras.get("CARD", [])
+    if card:
+        width = max(len(f"p{party}") for _page, _slot, party in card)
+        lines.append(f"Card {len(card)}")
+        for page, slot, party in card:
+            lines.append(f"{f'p{party}'.ljust(width)} : Page {page} Slot {slot}")
+
+    astro = {r: extras.get(r, []) for r in SPREAD_GROUPS["astro"]}
+    sets = max((len(v) for v in astro.values()), default=0)
+    if sets:
+        if lines:
+            lines.append("")
+        lines.append(
+            f"Astrocore {sets} {'set' if sets == 1 else 'sets'} (4 ประเภท)"
+        )
+        lines.extend(_astro_extra_lines(astro))
+
+    return lines
+
+
 def _emperium_signature(outcome, include_card, include_astro):
     """What makes two ranks look the same in the posted note."""
     parts = [outcome["queues"], tuple(outcome["feather_left"].values())]
@@ -838,30 +957,11 @@ def build_emperium_plan_messages(league, queue_start, count, starts, view, date)
                     f"Extra After Calculate : Astrocore {astro_extra} "
                     f"{'set' if astro_extra == 1 else 'sets'} (4 ประเภท)"
                 )
-                # One line per party with all four kinds: "page-slot" each.
-                kinds = list(SPREAD_GROUPS["astro"])
-                abbreviations = {reward: reward.split("_")[1] for reward in kinds}
-                lines.append(
-                    " / ".join(f"{abbreviations[r]} {kind_name(r)}" for r in kinds)
-                )
-                items = {r: first["rewards"][r]["extra_items"] for r in kinds}
-                rows = max(len(v) for v in items.values())
-                width = max(
-                    len(f"p{party}")
-                    for r in kinds
-                    for _page, _slot, party in items[r]
-                )
-                for index in range(rows):
-                    party = next(
-                        items[r][index][2] for r in kinds if index < len(items[r])
+                lines.extend(
+                    _astro_extra_lines(
+                        {r: first["rewards"][r]["extra_items"] for r in SPREAD_GROUPS["astro"]}
                     )
-                    cells = [
-                        f"{abbreviations[r]} {items[r][index][0]}-{items[r][index][1]}"
-                        if index < len(items[r])
-                        else f"{abbreviations[r]} -"
-                        for r in kinds
-                    ]
-                    lines.append(f"{f'p{party}'.ljust(width)} : " + " | ".join(cells))
+                )
 
         if include_card:
             left = first["feather_left"]

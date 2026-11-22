@@ -11,7 +11,14 @@ from constants import (
     list_offset,
     position,
 )
-from parties import party_label
+from parties import (
+    effective_queue_start,
+    emperium_extras,
+    extra_overview_lines,
+    party_extra_lines,
+    party_label,
+    party_of,
+)
 from database import (
     get_party_plan,
     get_all_queue,
@@ -299,15 +306,19 @@ class Queue(commands.Cog):
             queue_no,
             value,
             label=None,
+            heading=None,
+            icon="📋",
         ):
             separator = "────────────────────"
             queue_value = f"{value}\n\n{separator}" if value else separator
             values = split_value(queue_value)
 
             for index, field_value in enumerate(values):
-                title = f"Queue #{queue_no}" + (f" · {label}" if label else "")
+                title = heading or (
+                    f"Queue #{queue_no}" + (f" · {label}" if label else "")
+                )
                 field_name = (
-                    f"📋 {title}"
+                    f"{icon} {title}"
                     if index == 0
                     else f"↳ {title} (continued)"
                 )
@@ -371,6 +382,15 @@ class Queue(commands.Cog):
             embed_title = f"📂 {independent_category}"
             embed = create_embed(embed_title)
 
+            # Emperium: Extra Card / Astrocore are not in the queues but go to
+            # parties, so they are shown under the queue of the party that gets
+            # them and, in the full list, once more by party.
+            extras = (
+                emperium_extras(guild_id, emperium_plan)
+                if independent_category == "Emperium Overrun"
+                else {}
+            )
+
             for _, queue_no in sorted(category_keys, key=lambda x: x[1]):
                 category_groups = queues[(independent_category, queue_no)]
                 reward_groups = category_groups.get(independent_category)
@@ -378,6 +398,19 @@ class Queue(commands.Cog):
                     continue
 
                 value = self.build_queue_value(reward_groups)
+                if extras:
+                    party = party_of(
+                        queue_no,
+                        effective_queue_start(emperium_plan),
+                        emperium_plan["party_count"],
+                    )
+                    extra_lines = party_extra_lines(extras, party)
+                    if extra_lines:
+                        value = (
+                            (value + "\n\n" if value else "")
+                            + f"🎁 Extra ของ P{party}\n"
+                            + "\n".join(extra_lines)
+                        )
                 embed = add_queue_to_embeds(
                     embeds,
                     embed,
@@ -387,6 +420,17 @@ class Queue(commands.Cog):
                     party_label(queue_no, emperium_plan)
                     if independent_category == "Emperium Overrun"
                     else None,
+                )
+
+            if extras and number is None:
+                embed = add_queue_to_embeds(
+                    embeds,
+                    embed,
+                    embed_title,
+                    0,
+                    "\n".join(extra_overview_lines(extras)),
+                    heading="Extra After Calculate (ตามปาร์ตี้)",
+                    icon="🎁",
                 )
 
             if embed.fields:
