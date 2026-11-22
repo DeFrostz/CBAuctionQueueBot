@@ -21,10 +21,13 @@ move together (same queues), so a party gets a complete set.
 """
 
 from constants import (
+    EMPERIUM_CATEGORY,
+    EMPERIUM_TABLE,
     LINKED,
     REWARD_NAMES,
     SPREAD_GROUPS,
     SPREAD_REWARDS,
+    emperium_rank_values,
     list_offset,
     position,
 )
@@ -45,6 +48,7 @@ from generator import (
 )
 
 SHORT_NAMES = {"Guild League": "GL", "League Prize": "LP"}
+SCOPE_CATEGORIES = {"linked": LINKED, "emperium": (EMPERIUM_CATEGORY,)}
 GROUP_TITLES = {"card": "Card", "astro": "Astrocore"}
 
 
@@ -311,20 +315,21 @@ def assign_spread(guild_id, plan, categories):
     return spread
 
 
-def end_day(guild_id):
+def end_day(guild_id, scope="linked"):
     """
     Move the pointers to where tomorrow starts.
 
+    scope: "linked" (Guild League / League Prize) or "emperium".
     Returns a dict. On failure it has an "error" key:
     "no_plan", "closed" or "no_queues".
     """
-    plan = get_party_plan(guild_id)
+    plan = get_party_plan(guild_id, scope)
     if plan is None:
         return {"error": "no_plan"}
     if plan["day_closed"]:
         return {"error": "closed"}
 
-    last_queue = get_max_queue_no(guild_id, LINKED)
+    last_queue = get_max_queue_no(guild_id, SCOPE_CATEGORIES[scope])
     if last_queue == 0:
         return {"error": "no_queues"}
 
@@ -340,7 +345,9 @@ def end_day(guild_id):
     new_card_start = moved(plan["last_card_party"], group_start(plan, "card"))
     new_astro_start = moved(plan["last_astro_party"], group_start(plan, "astro"))
 
-    update_party_pointers(guild_id, new_queue_start, new_card_start, new_astro_start, 1)
+    update_party_pointers(
+        guild_id, new_queue_start, new_card_start, new_astro_start, 1, scope
+    )
 
     return {
         "last_queue": last_queue,
@@ -446,7 +453,7 @@ def render_party_views(last_queue, spread, queue_start, count, view, header):
                 default=0,
             )
             if sets:
-                text += f" + Astro x{sets}"
+                text += f" + Astrocore {sets} {'set' if sets == 1 else 'sets'} (4 ประเภท)"
             lines.append(text)
         add_section(_chunk_blocks("queue - party", lines))
 
@@ -514,7 +521,7 @@ def preview_party_plan(guild_id, plan, view, header):
     }
 
 
-def build_party_note(guild_id, plan, date):
+def build_party_note(guild_id, plan, date, scope="linked"):
     """
     Short note about where today's rotation ended, or None without queues.
 
@@ -523,7 +530,8 @@ def build_party_note(guild_id, plan, date):
     +1 today, the latest separated party is still the one from the days
     before: the party right before today's rotation start.
     """
-    last_queue = get_max_queue_no(guild_id, LINKED)
+    categories = SCOPE_CATEGORIES[scope]
+    last_queue = get_max_queue_no(guild_id, categories)
     if last_queue == 0:
         return None
 
@@ -533,7 +541,7 @@ def build_party_note(guild_id, plan, date):
     def has_stock(group):
         return any(
             int(row["stock"]) > 0
-            for category in LINKED
+            for category in categories
             for row in get_rewards(guild_id, category)
             if row["reward_type"] in SPREAD_GROUPS[group]
         )
@@ -547,10 +555,333 @@ def build_party_note(guild_id, plan, date):
         start = group_start(plan, group)
         return f"P{(start - 2) % count + 1}"
 
+    title = f"Note {date}" + (" Emperium" if scope == "emperium" else "")
     lines = [
-        f"Note {date}",
+        title,
         f"Lastest Seperated Queue Card  : {latest('card', plan['last_card_party'])}",
         f"Lastest Seperated Queue Astrocore : {latest('astro', plan['last_astro_party'])}",
         f"Lastest Normal Queue Count : P{party_of(last_queue, queue_start, count)}",
     ]
     return "```\n" + "\n".join(lines) + "\n```"
+
+# -------------------------
+# Emperium Overrun
+# -------------------------
+#
+# Same party rotation as Guild League, but with its own plan. Feathers decide
+# the queues. Card and Astrocore: every queue gets pool // queues (never above
+# the limit); what is left ("Extra After Calculate") is not tied to a queue:
+# one item per party along the party rotation, from the group's own pointer.
+
+
+def _emperium_rows(values):
+    """Reward rows (dicts) built from a rank's {reward: (stock, limit)}."""
+    return [
+        {
+            "category": EMPERIUM_CATEGORY,
+            "reward_type": reward,
+            "stock": stock,
+            "limit_per_queue": limit,
+        }
+        for reward, (stock, limit) in values.items()
+    ]
+
+
+def emperium_outcome(rows, queue_start, count, starts):
+    """
+    Work out one Emperium day (pure: nothing is read or saved).
+
+    rows: reward rows of Emperium Overrun. starts: {"card": party, "astro": party}
+    where each Extra rotation starts. Returns None when no queue can be made.
+    """
+    queues = get_queue_count_from_rewards(rows, SPREAD_REWARDS)
+    if queues == 0:
+        return None
+
+    stocks, limits = reward_values(rows)
+
+    feather_left = {
+        reward: stocks[reward] - queues * limits[reward]
+        for reward in ("FEATHER_S", "FEATHER_A")
+    }
+
+    rewards_out = {}
+    groups_out = {}
+
+    for group, rewards in SPREAD_GROUPS.items():
+        start_party = starts[group]
+        max_extra = 0
+
+        for reward in rewards:
+            total = stocks[reward]
+            cap = limits[reward]  # 0 = no limit per queue
+            base = total // queues
+            if cap > 0:
+                base = min(base, cap)
+            extra = total - base * queues
+
+            offset = list_offset(reward, stocks)
+            pool = [position(offset + index) for index in range(total)]
+
+            assignments = {}
+            if base:
+                for queue_no in range(1, queues + 1):
+                    start = (queue_no - 1) * base
+                    assignments[queue_no] = [
+                        (EMPERIUM_CATEGORY, page, slot)
+                        for page, slot in pool[start : start + base]
+                    ]
+
+            extra_items = []
+            for index, (page, slot) in enumerate(pool[queues * base :]):
+                party = (start_party - 1 + index) % count + 1
+                extra_items.append((page, slot, party))
+
+            rewards_out[reward] = {
+                "total": total,
+                "cap": cap,
+                "per_queue": base,
+                "extra": extra,
+                "assignments": assignments,
+                "extra_items": extra_items,
+            }
+            max_extra = max(max_extra, extra)
+
+        groups_out[group] = {
+            "start_party": start_party,
+            "extra": max_extra,
+            "last_party": (
+                (start_party - 1 + max_extra - 1) % count + 1 if max_extra else None
+            ),
+        }
+
+    return {
+        "queues": queues,
+        "limits": limits,
+        "feather_left": feather_left,
+        "rewards": rewards_out,
+        "groups": groups_out,
+    }
+
+
+def assign_emperium(guild_id, plan):
+    """Save the base Card / Astrocore rows of the generated Emperium queues."""
+    rows = get_rewards(guild_id, EMPERIUM_CATEGORY)
+    outcome = emperium_outcome(
+        rows,
+        effective_queue_start(plan),
+        plan["party_count"],
+        {"card": group_start(plan, "card"), "astro": group_start(plan, "astro")},
+    )
+    if outcome is None:
+        set_last_spread_parties(guild_id, None, None, "emperium")
+        return None
+
+    save_queue_positions_bulk(
+        [
+            (guild_id, category, queue_no, reward, page, slot)
+            for reward, item in outcome["rewards"].items()
+            for queue_no, entries in item["assignments"].items()
+            for category, page, slot in entries
+        ]
+    )
+
+    set_last_spread_parties(
+        guild_id,
+        outcome["groups"]["card"]["last_party"],
+        outcome["groups"]["astro"]["last_party"],
+        "emperium",
+    )
+    return outcome
+
+
+def emperium_summary_lines(outcome, count):
+    """Text lines describing an emperium_outcome for the /generate message."""
+    lines = []
+
+    for group, rewards in SPREAD_GROUPS.items():
+        info = outcome["groups"][group]
+        shown = [outcome["rewards"][r] for r in rewards]
+        if all(item["total"] == 0 for item in shown):
+            continue
+
+        signature = {(i["per_queue"], i["extra"], i["total"]) for i in shown}
+        if len(signature) == 1:
+            entries = [(GROUP_TITLES[group], shown[0])]
+        else:
+            entries = [
+                (kind_name(r) if group == "astro" else GROUP_TITLES[group], outcome["rewards"][r])
+                for r in rewards
+            ]
+
+        for title, item in entries:
+            parts = [f"{item['per_queue']} per queue"]
+            if item["extra"] > 0:
+                parties = [party for _page, _slot, party in item["extra_items"]]
+                parts.append(
+                    f"{item['extra']} extra to parties {compress_parties(parties, count)}"
+                )
+            lines.append(f"- {title}: " + ", ".join(parts))
+
+    left = outcome["feather_left"]
+    for reward, amount in left.items():
+        if amount > 0:
+            lines.append(f"- {REWARD_NAMES[reward]} left over: {amount}")
+
+    return lines
+
+
+def _emperium_signature(outcome, include_card, include_astro):
+    """What makes two ranks look the same in the posted note."""
+    parts = [outcome["queues"], tuple(outcome["feather_left"].values())]
+    if include_card:
+        parts.append(
+            tuple(
+                (page, slot)
+                for page, slot, _party in outcome["rewards"]["CARD"]["extra_items"]
+            )
+        )
+    if include_astro:
+        parts.append(
+            tuple(
+                tuple(
+                    (page, slot)
+                    for page, slot, _party in outcome["rewards"][reward]["extra_items"]
+                )
+                for reward in SPREAD_GROUPS["astro"]
+            )
+        )
+    return tuple(parts)
+
+
+def build_emperium_plan_messages(league, queue_start, count, starts, view, date):
+    """
+    The Emperium note for every rank of a league, ranks that look the same
+    grouped together ("Condition Rank 4 5 6").
+
+    view: "all" (Card and Astrocore), "card" or "astro".
+    Nothing is read from or written to the database.
+    """
+    include_card = view in ("all", "card")
+    include_astro = view in ("all", "astro")
+
+    outcomes = {}
+    for rank in range(1, len(EMPERIUM_TABLE[league]) + 1):
+        values = emperium_rank_values(league, rank)
+        outcome = emperium_outcome(_emperium_rows(values), queue_start, count, starts)
+        if outcome is not None:
+            outcomes[rank] = outcome
+
+    groups = []  # [signature, [ranks]]
+    for rank, outcome in outcomes.items():
+        signature = _emperium_signature(outcome, include_card, include_astro)
+        if groups and groups[-1][0] == signature:
+            groups[-1][1].append(rank)
+        else:
+            groups.append([signature, [rank]])
+
+    messages = []
+
+    for _signature, ranks in groups:
+        first = outcomes[ranks[0]]
+        lines = []
+
+        # Limits per queue: shown when every rank of the group agrees.
+        def limit_key(outcome):
+            key = []
+            if include_card:
+                key.extend(
+                    [
+                        outcome["rewards"]["CARD"]["per_queue"],
+                        outcome["limits"]["FEATHER_S"],
+                        outcome["limits"]["FEATHER_A"],
+                    ]
+                )
+            if include_astro:
+                key.append(outcome["rewards"]["ASTRO_GC"]["per_queue"])
+            return tuple(key)
+
+        keys = {limit_key(outcomes[r]) for r in ranks}
+        if len(keys) == 1:
+            key = list(next(iter(keys)))
+            text = []
+            if include_card:
+                text.append(f"การ์ด {key[0]} ขาวดำ {key[1]} แดงดำ {key[2]}")
+            if include_astro:
+                text.append(
+                    f"astrocore {key[-1]} {'set' if key[-1] == 1 else 'sets'} (4 ประเภท)"
+                )
+            lines.append(" ".join(text))
+        else:
+            lines.append("limit follow rank")
+
+        if include_card:
+            lines.append("queue - party")
+            width = max(2, len(str(first["queues"])))
+            for queue_no in range(1, first["queues"] + 1):
+                lines.append(
+                    f"{queue_no:0{width}d} - p{party_of(queue_no, queue_start, count)}"
+                )
+
+            card_extra = first["rewards"]["CARD"]["extra"]
+            if card_extra:
+                lines.append("")
+                lines.append(f"Extra After Calculate : Card {card_extra}")
+                for page, slot, party in first["rewards"]["CARD"]["extra_items"]:
+                    lines.append(f"Card Page {page} : Slot {slot} - p{party}")
+
+        if include_astro:
+            astro_extra = first["rewards"]["ASTRO_GC"]["extra"]
+            if astro_extra:
+                lines.append("")
+                lines.append(
+                    f"Extra After Calculate : Astrocore {astro_extra} "
+                    f"{'set' if astro_extra == 1 else 'sets'} (4 ประเภท)"
+                )
+                # One line per party with all four kinds: "page-slot" each.
+                kinds = list(SPREAD_GROUPS["astro"])
+                abbreviations = {reward: reward.split("_")[1] for reward in kinds}
+                lines.append(
+                    " / ".join(f"{abbreviations[r]} {kind_name(r)}" for r in kinds)
+                )
+                items = {r: first["rewards"][r]["extra_items"] for r in kinds}
+                rows = max(len(v) for v in items.values())
+                width = max(
+                    len(f"p{party}")
+                    for r in kinds
+                    for _page, _slot, party in items[r]
+                )
+                for index in range(rows):
+                    party = next(
+                        items[r][index][2] for r in kinds if index < len(items[r])
+                    )
+                    cells = [
+                        f"{abbreviations[r]} {items[r][index][0]}-{items[r][index][1]}"
+                        if index < len(items[r])
+                        else f"{abbreviations[r]} -"
+                        for r in kinds
+                    ]
+                    lines.append(f"{f'p{party}'.ljust(width)} : " + " | ".join(cells))
+
+        if include_card:
+            left = first["feather_left"]
+            if left["FEATHER_S"] or left["FEATHER_A"]:
+                lines.append("")
+                lines.append(
+                    f"Extra After Calculate : ขาวดำ {left['FEATHER_S']} "
+                    f"แดงดำ {left['FEATHER_A']}"
+                )
+
+        title = "Condition Rank " + " ".join(str(r) for r in ranks)
+        body = "```\n" + "\n".join(lines) + "\n```"
+        if len(body) > 1900:
+            blocks = _chunk_blocks(lines[0], lines[1:])
+            messages.append(title + "\n" + blocks[0])
+            messages.extend(blocks[1:])
+        else:
+            messages.append(title + "\n" + body)
+
+    if date and messages:
+        messages[0] = date + "\n" + messages[0]
+
+    return messages

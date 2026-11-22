@@ -220,7 +220,7 @@ def get_skip_reason(rewards, exclude=()):
     return None
 
 
-def check_categories(guild_id, categories, exclude=()):
+def check_categories(guild_id, categories, exclude=(), exclude_for=LINKED):
     """
     Split categories into ready and skipped.
 
@@ -232,7 +232,7 @@ def check_categories(guild_id, categories, exclude=()):
 
     for category in categories:
         rows = get_rewards(guild_id, category)
-        reason = get_skip_reason(rows, exclude if category in LINKED else ())
+        reason = get_skip_reason(rows, exclude if category in exclude_for else ())
 
         if reason:
             skipped.append((category, reason))
@@ -242,7 +242,7 @@ def check_categories(guild_id, categories, exclude=()):
     return ready, skipped
 
 
-def generate_all(guild_id, category_rewards, exclude=()):
+def generate_all(guild_id, category_rewards, exclude=(), exclude_for=LINKED):
     """
     Regenerate queues for every ready category (from check_categories).
 
@@ -267,7 +267,7 @@ def generate_all(guild_id, category_rewards, exclude=()):
     for category, rows in category_rewards.items():
         start_no = linked_next_queue_no if category in LINKED else 1
         count = generate_queue(
-            guild_id, rows, start_no, exclude if category in LINKED else ()
+            guild_id, rows, start_no, exclude if category in exclude_for else ()
         )
 
         if category in LINKED:

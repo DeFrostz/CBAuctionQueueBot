@@ -7,12 +7,15 @@ import asyncio
 from choices import CATEGORY_CHOICES
 from constants import (
     CATEGORIES,
+    EMPERIUM_CATEGORY,
+    EMPERIUM_TABLE,
     LINKED,
     RANK_TABLE,
     REQUIRED_REWARDS,
     REWARD_NAMES,
     REWARD_TYPES,
     SPREAD_REWARDS,
+    emperium_rank_values,
     rank_values,
 )
 from database import (
@@ -30,9 +33,14 @@ from database import (
 
 from generator import check_categories, generate_all
 from parties import (
+    SCOPE_CATEGORIES,
+    assign_emperium,
     assign_spread,
+    build_emperium_plan_messages,
     build_party_note,
+    emperium_summary_lines,
     end_day,
+    group_start,
     preview_party_plan,
     spread_summary_lines,
 )
@@ -42,6 +50,18 @@ RANK_CHOICES = [
     discord.app_commands.Choice(name=name, value=name)
     for name, _pool, _limit in RANK_TABLE
 ]
+
+AREA_CHOICES = [
+    discord.app_commands.Choice(name="Guild League / League Prize", value="linked"),
+    discord.app_commands.Choice(name="Emperium Overrun", value="emperium"),
+]
+
+EMPERIUM_LEAGUE_CHOICES = [
+    discord.app_commands.Choice(name=league, value=league)
+    for league in EMPERIUM_TABLE
+]
+
+AREA_TITLES = {"linked": "Guild League / League Prize", "emperium": "Emperium Overrun"}
 
 SET_CATEGORY_CHOICES = [
     discord.app_commands.Choice(name=cat, value=cat)
@@ -164,13 +184,15 @@ class Admin(commands.Cog):
 
     @discord.app_commands.command(
         name="setparty",
-        description="Set the party rotation for Guild League / League Prize",
+        description="Set the party rotation (Guild League / League Prize, or Emperium Overrun)",
     )
+    @discord.app_commands.choices(area=AREA_CHOICES)
     @discord.app_commands.describe(
         queue_start="Party of queue 1 today (example: 5 for P5)",
         card_start="Party where the Card +1 rotation starts today (example: 11 for P11)",
         astro_start="Party where the Astrocore +1 rotation starts (same as card_start if empty)",
         party_count="Number of parties in the rotation (keeps the current value, 16 at first)",
+        area="Which plan to set (Guild League / League Prize by default)",
     )
     async def setparty(
         self,
@@ -179,12 +201,14 @@ class Admin(commands.Cog):
         card_start: int,
         astro_start: int | None = None,
         party_count: int | None = None,
+        area: discord.app_commands.Choice[str] | None = None,
     ):
         if interaction.guild is None:
             await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
             return
         guild_id = str(interaction.guild.id)
-        current = get_party_plan(guild_id)
+        scope = area.value if area is not None else "linked"
+        current = get_party_plan(guild_id, scope)
         if party_count is None:
             party_count = current["party_count"] if current is not None else 16
         if not 1 <= party_count <= 100:
@@ -202,15 +226,15 @@ class Admin(commands.Cog):
                     f"❌ {name} must be a party between 1 and {party_count}", ephemeral=True
                 )
                 return
-        set_party_plan(guild_id, party_count, queue_start, card_start, astro_start)
+        set_party_plan(guild_id, party_count, queue_start, card_start, astro_start, scope)
         lines = [
-            "✅ Party plan updated",
+            f"✅ Party plan updated ({AREA_TITLES[scope]})",
             f"Parties: {party_count}",
             f"Queue 1: P{queue_start}",
             f"Card rotation starts at: P{card_start}",
             f"Astrocore rotation starts at: P{astro_start}",
         ]
-        if get_max_queue_no(guild_id, LINKED) > 0:
+        if get_max_queue_no(guild_id, SCOPE_CATEGORIES[scope]) > 0:
             lines.extend(["", "ℹ️ Run /generate again so the queues and Cards follow the new plan."])
         await interaction.response.send_message("\n".join(lines))
 
@@ -218,12 +242,19 @@ class Admin(commands.Cog):
         name="endday",
         description="Close today and move the party pointers to tomorrow",
     )
-    async def endday(self, interaction: discord.Interaction):
+    @discord.app_commands.choices(area=AREA_CHOICES)
+    @discord.app_commands.describe(area="Which plan to close (Guild League / League Prize by default)")
+    async def endday(
+        self,
+        interaction: discord.Interaction,
+        area: discord.app_commands.Choice[str] | None = None,
+    ):
         if interaction.guild is None:
             await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
             return
         guild_id = str(interaction.guild.id)
-        result = end_day(guild_id)
+        scope = area.value if area is not None else "linked"
+        result = end_day(guild_id, scope)
         error = result.get("error")
         if error == "no_plan":
             await interaction.response.send_message("❌ No party plan yet. Use /setparty first.", ephemeral=True)
@@ -235,20 +266,21 @@ class Admin(commands.Cog):
             return
         if error == "no_queues":
             await interaction.response.send_message(
-                "❌ No Guild League / League Prize queues generated. Use /generate first.", ephemeral=True
+                f"❌ No {AREA_TITLES[scope]} queues generated. Use /generate first.", ephemeral=True
             )
             return
+        word = "extra" if scope == "emperium" else "+1"
         if result["last_card_party"] is not None:
-            card_line = f"Last Card +1: P{result['last_card_party']}"
+            card_line = f"Last Card {word}: P{result['last_card_party']}"
         else:
-            card_line = "No Card +1 today, so the Card rotation stays where it was"
+            card_line = f"No Card {word} today, so the Card rotation stays where it was"
         if result["last_astro_party"] is not None:
-            astro_line = f"Last Astrocore +1: P{result['last_astro_party']}"
+            astro_line = f"Last Astrocore {word}: P{result['last_astro_party']}"
         else:
-            astro_line = "No Astrocore +1 today, so the Astrocore rotation stays where it was"
+            astro_line = f"No Astrocore {word} today, so the Astrocore rotation stays where it was"
         await interaction.response.send_message(
             "\n".join([
-                "✅ Day closed",
+                f"✅ Day closed ({AREA_TITLES[scope]})",
                 f"Last queue: #{result['last_queue']} (P{result['last_party']})",
                 card_line,
                 astro_line,
@@ -266,20 +298,30 @@ class Admin(commands.Cog):
         name="partynote",
         description="Post where today's Card, Astrocore and queues ended (by party)",
     )
-    @discord.app_commands.describe(date="Heading date, example 19/11")
-    async def partynote(self, interaction: discord.Interaction, date: str):
+    @discord.app_commands.choices(area=AREA_CHOICES)
+    @discord.app_commands.describe(
+        date="Heading date, example 19/11",
+        area="Which plan (Guild League / League Prize by default)",
+    )
+    async def partynote(
+        self,
+        interaction: discord.Interaction,
+        date: str,
+        area: discord.app_commands.Choice[str] | None = None,
+    ):
         if interaction.guild is None:
             await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
             return
         guild_id = str(interaction.guild.id)
-        plan = get_party_plan(guild_id)
+        scope = area.value if area is not None else "linked"
+        plan = get_party_plan(guild_id, scope)
         if plan is None:
             await interaction.response.send_message("❌ No party plan yet. Use /setparty first.", ephemeral=True)
             return
-        note = build_party_note(guild_id, plan, date.strip())
+        note = build_party_note(guild_id, plan, date.strip(), scope)
         if note is None:
             await interaction.response.send_message(
-                "❌ No Guild League / League Prize queues generated. Use /generate first.", ephemeral=True
+                f"❌ No {AREA_TITLES[scope]} queues generated. Use /generate first.", ephemeral=True
             )
             return
         await interaction.response.send_message(note)
@@ -339,6 +381,95 @@ class Admin(commands.Cog):
             await interaction.followup.send(message)
         # Remarks are only for the person who ran the command.
         await interaction.followup.send("\n".join(f"ℹ️ {note}" for note in result["notes"]), ephemeral=True)
+
+    @discord.app_commands.command(
+        name="setemperium",
+        description="Set Emperium Overrun pools and limits from a league and rank",
+    )
+    @discord.app_commands.choices(league=EMPERIUM_LEAGUE_CHOICES)
+    @discord.app_commands.describe(league="Advance or Normal", rank="Rank 1-8")
+    async def setemperium(
+        self,
+        interaction: discord.Interaction,
+        league: discord.app_commands.Choice[str],
+        rank: int,
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
+            return
+        guild_id = str(interaction.guild.id)
+        if get_party_plan(guild_id, "emperium") is None:
+            await interaction.response.send_message(
+                "❌ Set the Emperium party plan first with /setparty area:Emperium Overrun.",
+                ephemeral=True,
+            )
+            return
+        values = emperium_rank_values(league.value, rank)
+        if values is None:
+            await interaction.response.send_message("❌ Rank must be between 1 and 8", ephemeral=True)
+            return
+        for reward, (stock, limit) in values.items():
+            set_reward_stock(guild_id, reward, stock, EMPERIUM_CATEGORY)
+            set_reward_limit(guild_id, reward, limit, EMPERIUM_CATEGORY)
+        lines = [f"✅ Emperium Overrun {league.value} rank {rank} set", ""]
+        for reward in REWARD_TYPES:
+            stock, limit = values[reward]
+            lines.append(f"{REWARD_NAMES[reward]}: pool {stock}, limit {limit}")
+        lines.extend(["", "Next: /generate category:Emperium Overrun"])
+        await interaction.response.send_message("\n".join(lines))
+
+    @discord.app_commands.command(
+        name="emperiumplan",
+        description="Quick calculation of the Emperium queue - party notes for every rank (saves nothing)",
+    )
+    @discord.app_commands.choices(
+        league=EMPERIUM_LEAGUE_CHOICES,
+        view=[
+            discord.app_commands.Choice(name="Card and Astrocore", value="all"),
+            discord.app_commands.Choice(name="Card and queue - party only", value="card"),
+            discord.app_commands.Choice(name="Astrocore extras only", value="astro"),
+        ],
+    )
+    @discord.app_commands.describe(
+        date="Heading date, example 22/11",
+        league="Advance or Normal",
+        view="What to show (Card and Astrocore by default)",
+    )
+    async def emperiumplan(
+        self,
+        interaction: discord.Interaction,
+        date: str,
+        league: discord.app_commands.Choice[str],
+        view: discord.app_commands.Choice[str] | None = None,
+    ):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ This command can only be used in a server", ephemeral=True)
+            return
+        guild_id = str(interaction.guild.id)
+        plan = get_party_plan(guild_id, "emperium")
+        if plan is None:
+            await interaction.response.send_message(
+                "❌ No Emperium party plan yet. Use /setparty area:Emperium Overrun first.",
+                ephemeral=True,
+            )
+            return
+        starts = {"card": group_start(plan, "card"), "astro": group_start(plan, "astro")}
+        messages = build_emperium_plan_messages(
+            league.value,
+            plan["queue_start"],
+            plan["party_count"],
+            starts,
+            view.value if view is not None else "all",
+            date.strip(),
+        )
+        await interaction.response.send_message(messages[0])
+        for message in messages[1:]:
+            await interaction.followup.send(message)
+        await interaction.followup.send(
+            f"ℹ️ Queue 1 = P{plan['queue_start']}, Card extras start at P{starts['card']}, "
+            f"Astrocore extras start at P{starts['astro']}. Preview only, nothing was saved.",
+            ephemeral=True,
+        )
 
     @discord.app_commands.command(
         name="setrank",
@@ -447,6 +578,20 @@ class Admin(commands.Cog):
                 inline=False,
             )
 
+        eplan = get_party_plan(guild_id, "emperium")
+        if eplan is not None and EMPERIUM_CATEGORY in targets:
+            embed.add_field(
+                name="🎉 Party plan (Emperium Overrun)",
+                value=(
+                    f"Parties: **{eplan['party_count']}**\n"
+                    f"Queue 1: **P{eplan['queue_start']}**\n"
+                    f"Card extras start at: **P{eplan['card_start']}**\n"
+                    f"Astrocore extras start at: **P{eplan['astro_start'] if eplan['astro_start'] is not None else eplan['card_start']}**\n"
+                    f"Day: **{'closed' if eplan['day_closed'] else 'open'}**"
+                ),
+                inline=False,
+            )
+
         await interaction.response.send_message(
             embed=embed,
             ephemeral=True,
@@ -483,10 +628,12 @@ class Admin(commands.Cog):
         elif category_value in LINKED: to_generate = list(LINKED)
         else: to_generate = [category_value]
         plan = get_party_plan(guild_id)
+        eplan = get_party_plan(guild_id, "emperium")
         # With a party plan, Card and Astrocore are spread by party and stay
-        # out of the queue count of Guild League / League Prize.
-        exclude = SPREAD_REWARDS if plan is not None else ()
-        category_rewards, skipped_categories = check_categories(guild_id, to_generate, exclude)
+        # out of the queue count (Guild League / League Prize, Emperium Overrun).
+        exclude = SPREAD_REWARDS if (plan is not None or eplan is not None) else ()
+        exclude_for = (*(LINKED if plan is not None else ()), *((EMPERIUM_CATEGORY,) if eplan is not None else ()))
+        category_rewards, skipped_categories = check_categories(guild_id, to_generate, exclude, exclude_for)
         if not category_rewards:
             lines = ["❌ No categories are ready to generate."]
             if skipped_categories:
@@ -496,7 +643,7 @@ class Admin(commands.Cog):
             return
         await interaction.response.defer(thinking=True)
         try:
-            summary = await asyncio.to_thread(generate_all, guild_id, category_rewards, exclude)
+            summary = await asyncio.to_thread(generate_all, guild_id, category_rewards, exclude, exclude_for)
             results = summary["results"]
             extra_count = summary["extra_count"]
             remaining_extra = summary["remaining_extra"]
@@ -511,6 +658,12 @@ class Admin(commands.Cog):
                     remaining_extra = dict(remaining_extra)
                     for reward, item in spread["rewards"].items():
                         remaining_extra[reward] = item["left"]
+            emperium_outcome = None
+            if EMPERIUM_CATEGORY in results and eplan is not None:
+                set_day_closed(guild_id, False, "emperium")
+                set_used_queue_start(guild_id, eplan["queue_start"], "emperium")
+                eplan = get_party_plan(guild_id, "emperium")
+                emperium_outcome = await asyncio.to_thread(assign_emperium, guild_id, eplan)
             lines = ["✅ Queue Generated", ""]
             if any(cat in results for cat in LINKED):
                 lines.append("🏆 Guild League / League Prize")
@@ -535,6 +688,8 @@ class Admin(commands.Cog):
                 if cat not in results: continue
                 data = results[cat]; lines.extend(["", f"📂 {cat}"])
                 lines.append(f"- {data['count']} (Queue {data['start']}-{data['end']})" if data["count"] > 0 else "- 0")
+                if cat == EMPERIUM_CATEGORY and emperium_outcome is not None:
+                    lines.extend(emperium_summary_lines(emperium_outcome, eplan["party_count"]))
             if skipped_categories:
                 lines.extend(["", "Skipped:"])
                 for cat, reason in skipped_categories: lines.append(f"- {cat}: {reason}")

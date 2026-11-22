@@ -119,3 +119,53 @@ def rank_values(rank_name):
                 values[reward] = (astro, l_astro)
             return values
     return None
+
+
+# Emperium Overrun auction table per league and rank (rank 1 = best).
+# Same layout as RANK_TABLE: pool and limit as (Card, Light-Dark, Time-Space,
+# Astrocore of each kind).
+EMPERIUM_CATEGORY = "Emperium Overrun"
+
+EMPERIUM_TABLE = {
+    "Advance": (
+        ((20, 150, 170, 20), (2, 15, 17, 4)),
+        ((20, 140, 160, 18), (2, 14, 16, 4)),
+        ((20, 140, 160, 18), (2, 14, 16, 4)),
+        ((15, 120, 150, 16), (2, 12, 15, 3)),
+        ((15, 120, 150, 16), (2, 12, 15, 3)),
+        ((15, 120, 150, 16), (2, 12, 15, 3)),
+        ((12, 100, 150, 14), (2, 10, 15, 3)),
+        ((12, 100, 150, 14), (2, 10, 15, 3)),
+    ),
+    "Normal": (
+        ((10, 80, 140, 10), (1, 8, 14, 2)),
+        ((9, 75, 130, 10), (1, 8, 13, 2)),
+        ((8, 70, 120, 10), (1, 7, 12, 2)),
+        ((5, 65, 110, 8), (1, 7, 11, 2)),
+        ((5, 60, 100, 8), (1, 6, 10, 2)),
+        ((5, 50, 80, 6), (1, 5, 8, 1)),
+        ((2, 30, 30, 4), (1, 3, 3, 1)),
+        ((1, 20, 20, 2), (1, 2, 2, 1)),
+    ),
+}
+
+
+def emperium_rank_values(league, rank):
+    """{reward: (stock, limit)} for an Emperium league and rank, or None."""
+    ranks = EMPERIUM_TABLE.get(league)
+    if ranks is None or not 1 <= rank <= len(ranks):
+        return None
+    (card, light_dark, time_space, astro), (
+        l_card,
+        l_light_dark,
+        l_time_space,
+        l_astro,
+    ) = ranks[rank - 1]
+    values = {
+        "CARD": (card, l_card),
+        "FEATHER_S": (light_dark, l_light_dark),
+        "FEATHER_A": (time_space, l_time_space),
+    }
+    for reward in SPREAD_GROUPS["astro"]:
+        values[reward] = (astro, l_astro)
+    return values

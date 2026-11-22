@@ -123,8 +123,9 @@ def init_database():
     # Party plan: which party each Guild League / League Prize queue belongs
     # to, and where the next Card goes. Rows are never touched by the reward
     # or queue tables.
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS party_plan (
+    for table in ("party_plan", "emperium_plan"):
+        cursor.execute(f"""
+    CREATE TABLE IF NOT EXISTS {table} (
         guild_id TEXT PRIMARY KEY,
         party_count INTEGER NOT NULL,
         queue_start INTEGER NOT NULL,
@@ -137,13 +138,13 @@ def init_database():
     )
     """)
 
-    # Migration: older party_plan tables miss the newer columns.
-    party_cols = [
-        r[1] for r in cursor.execute("PRAGMA table_info(party_plan)").fetchall()
-    ]
-    for column in ("used_queue_start", "astro_start", "last_astro_party"):
-        if column not in party_cols:
-            cursor.execute(f"ALTER TABLE party_plan ADD COLUMN {column} INTEGER")
+        # Migration: older plan tables miss the newer columns.
+        plan_cols = [
+            r[1] for r in cursor.execute(f"PRAGMA table_info({table})").fetchall()
+        ]
+        for column in ("used_queue_start", "astro_start", "last_astro_party"):
+            if column not in plan_cols:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} INTEGER")
 
     conn.commit()
     conn.close()
@@ -382,25 +383,38 @@ def clear_rewards(guild_id, category=None):
 
 
 # -------------------------
-# Party plan (Guild League / League Prize)
+# Party plans
 # -------------------------
+#
+# "linked" = Guild League / League Prize (table party_plan)
+# "emperium" = Emperium Overrun (table emperium_plan)
+# Both tables have the same columns.
+
+PLAN_TABLES = {
+    "linked": "party_plan",
+    "emperium": "emperium_plan",
+}
 
 
-def get_party_plan(guild_id):
+def get_party_plan(guild_id, scope="linked"):
     """Return the party plan row for a guild, or None if it is not set."""
+    table = PLAN_TABLES[scope]
     conn = get_connection()
     row = conn.execute(
-        "SELECT * FROM party_plan WHERE guild_id=?", (guild_id,)
+        f"SELECT * FROM {table} WHERE guild_id=?", (guild_id,)
     ).fetchone()
     conn.close()
     return row
 
 
-def set_party_plan(guild_id, party_count, queue_start, card_start, astro_start):
+def set_party_plan(
+    guild_id, party_count, queue_start, card_start, astro_start, scope="linked"
+):
+    table = PLAN_TABLES[scope]
     conn = get_connection()
     conn.execute(
-        """
-    INSERT INTO party_plan
+        f"""
+    INSERT INTO {table}
     (guild_id, party_count, queue_start, card_start, astro_start, day_closed)
     VALUES (?, ?, ?, ?, ?, 0)
     ON CONFLICT(guild_id)
@@ -420,12 +434,15 @@ def set_party_plan(guild_id, party_count, queue_start, card_start, astro_start):
     conn.close()
 
 
-def update_party_pointers(guild_id, queue_start, card_start, astro_start, day_closed):
+def update_party_pointers(
+    guild_id, queue_start, card_start, astro_start, day_closed, scope="linked"
+):
+    table = PLAN_TABLES[scope]
     conn = get_connection()
     conn.execute(
         # last_card_party / last_astro_party stay: they describe the day that
         # just ended (/partynote) until the next /generate replaces them.
-        "UPDATE party_plan SET queue_start=?, card_start=?, astro_start=?, day_closed=? "
+        f"UPDATE {table} SET queue_start=?, card_start=?, astro_start=?, day_closed=? "
         "WHERE guild_id=?",
         (queue_start, card_start, astro_start, day_closed, guild_id),
     )
@@ -433,10 +450,11 @@ def update_party_pointers(guild_id, queue_start, card_start, astro_start, day_cl
     conn.close()
 
 
-def set_day_closed(guild_id, closed):
+def set_day_closed(guild_id, closed, scope="linked"):
+    table = PLAN_TABLES[scope]
     conn = get_connection()
     conn.execute(
-        "UPDATE party_plan SET day_closed=? WHERE guild_id=?",
+        f"UPDATE {table} SET day_closed=? WHERE guild_id=?",
         (1 if closed else 0, guild_id),
     )
     conn.commit()
@@ -461,25 +479,27 @@ def get_max_queue_no(guild_id, categories, reward_type=None):
     return result[0]
 
 
-def set_last_spread_parties(guild_id, card_party, astro_party):
+def set_last_spread_parties(guild_id, card_party, astro_party, scope="linked"):
     """
-    Party that got the last "+1" of Card / Astrocore today.
+    Party that got the last "+1" / extra of Card and Astrocore today.
     None means nothing moved, so tomorrow starts where today started.
     """
+    table = PLAN_TABLES[scope]
     conn = get_connection()
     conn.execute(
-        "UPDATE party_plan SET last_card_party=?, last_astro_party=? WHERE guild_id=?",
+        f"UPDATE {table} SET last_card_party=?, last_astro_party=? WHERE guild_id=?",
         (card_party, astro_party, guild_id),
     )
     conn.commit()
     conn.close()
 
 
-def set_used_queue_start(guild_id, queue_start):
+def set_used_queue_start(guild_id, queue_start, scope="linked"):
     """Remember which party queue 1 had when the queues were generated."""
+    table = PLAN_TABLES[scope]
     conn = get_connection()
     conn.execute(
-        "UPDATE party_plan SET used_queue_start=? WHERE guild_id=?",
+        f"UPDATE {table} SET used_queue_start=? WHERE guild_id=?",
         (queue_start, guild_id),
     )
     conn.commit()

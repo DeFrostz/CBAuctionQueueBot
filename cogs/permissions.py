@@ -18,6 +18,8 @@ ADMIN_ONLY_COMMANDS = {
     "partyplan",
     "setrank",
     "partynote",
+    "setemperium",
+    "emperiumplan",
 }
 
 

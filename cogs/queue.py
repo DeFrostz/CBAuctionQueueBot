@@ -327,6 +327,7 @@ class Queue(commands.Cog):
             return current_embed
 
         party_plan = get_party_plan(guild_id)
+        emperium_plan = get_party_plan(guild_id, "emperium")
         linked_keys = [key for key in queues if key[0] == "LINKED"]
         if linked_keys:
             embed_title = "🏆 Guild League / League Prize"
@@ -383,6 +384,9 @@ class Queue(commands.Cog):
                     embed_title,
                     queue_no,
                     value,
+                    party_label(queue_no, emperium_plan)
+                    if independent_category == "Emperium Overrun"
+                    else None,
                 )
 
             if embed.fields:
